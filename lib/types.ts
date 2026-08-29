@@ -1,0 +1,125 @@
+export type ItemStatus =
+  | "scheduled"
+  | "waiting"
+  | "later"
+  | "completed"
+  | "merged"
+  | "abandoned";
+
+export type ItemCategory =
+  | "work"
+  | "life"
+  | "shopping"
+  | "relationship"
+  | "personal"
+  | "other";
+
+export type Priority = "urgent" | "high" | "normal" | "low";
+export type Energy = "low" | "medium" | "high";
+
+export interface ItemEnrichment {
+  id: string;
+  kind: "requested" | "proactive";
+  title: string;
+  summary: string;
+  content: string;
+  request: string | null;
+  provider: "deepseek" | "local";
+  createdAt: string;
+}
+
+export interface NotebookNote {
+  id: string;
+  title: string;
+  summary: string;
+  content: string;
+  sourceItemTitle: string | null;
+  provider: "deepseek" | "local";
+  createdAt: string;
+}
+
+export interface Item {
+  id: string;
+  captureId: string;
+  title: string;
+  notes: string | null;
+  category: ItemCategory;
+  status: ItemStatus;
+  priority: Priority;
+  durationMinutes: number | null;
+  energy: Energy;
+  person: string | null;
+  contextLabel: string | null;
+  scheduledFor: string | null;
+  timeWindow: string | null;
+  sourceExcerpt: string | null;
+  extractionSource: "deepseek" | "local";
+  confidence: number;
+  needsConfirmation: boolean;
+  confirmationQuestion: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  sourceCount: number;
+  enrichmentCount: number;
+  enrichment: ItemEnrichment | null;
+  attachment?: {
+    id: string;
+    mimeType: string;
+    originalName: string;
+  } | null;
+}
+
+export interface MergeCandidate {
+  id: string;
+  title: string;
+  notes: string | null;
+  category: ItemCategory;
+  status: ItemStatus;
+  scheduledFor: string | null;
+  timeWindow: string | null;
+  person: string | null;
+  contextLabel: string | null;
+  sourceExcerpt: string | null;
+  updatedAt: string;
+  matchScore: number;
+}
+
+export interface DashboardData {
+  today: Item[];
+  quick: Item[];
+  later: Item[];
+  waiting: Item[];
+  inbox: Item[];
+  notebook: NotebookNote[];
+  completedToday: number;
+  totalOpen: number;
+  aiEnabled: boolean;
+}
+
+export interface ExtractedItem {
+  title: string;
+  notes: string | null;
+  category: ItemCategory;
+  priority: Priority;
+  durationMinutes: number | null;
+  energy: Energy;
+  person: string | null;
+  contextLabel: string | null;
+  scheduleHint:
+    | "now"
+    | "today"
+    | "tonight"
+    | "tomorrow"
+    | "weekend"
+    | "next_week"
+    | "waiting"
+    | "someday"
+    | "none";
+  specificTime: string | null;
+  timeWindow: string | null;
+  isActionable: boolean;
+  confidence: number;
+  needsConfirmation: boolean;
+  confirmationQuestion: string | null;
+}
