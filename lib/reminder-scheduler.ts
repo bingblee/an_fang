@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@/lib/db";
 import { configureWebPush } from "@/lib/push";
+import { getRuntimeConfig } from "@/lib/runtime-config.mjs";
 
 declare global {
   var __anfangReminderTimer: NodeJS.Timeout | undefined;
@@ -22,6 +23,7 @@ type PushRow = {
 };
 
 export async function checkDueReminders() {
+  if (!getRuntimeConfig().remindersEnabled) return;
   if (globalThis.__anfangReminderRunning) return;
   globalThis.__anfangReminderRunning = true;
   try {
@@ -95,6 +97,7 @@ export async function checkDueReminders() {
 }
 
 export function startReminderScheduler() {
+  if (!getRuntimeConfig().remindersEnabled) return;
   if (globalThis.__anfangReminderTimer) return;
   const run = () => {
     void checkDueReminders().catch((error) => {
@@ -104,4 +107,3 @@ export function startReminderScheduler() {
   setTimeout(run, 4_000);
   globalThis.__anfangReminderTimer = setInterval(run, 30_000);
 }
-

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb, itemSelect, mapItem, mapNotebookNote } from "@/lib/db";
 import type { DashboardData } from "@/lib/types";
 import { listTopics } from "@/lib/topics";
+import { getRuntimeConfig } from "@/lib/runtime-config.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,7 +71,8 @@ export async function GET() {
     aiEnabled: Boolean(process.env.DEEPSEEK_API_KEY)
   };
 
-  return NextResponse.json(data, {
+  const { environment, remindersEnabled } = getRuntimeConfig();
+  return NextResponse.json({ ...data, environment, remindersEnabled }, {
     headers: { "Cache-Control": "no-store" }
   });
 }

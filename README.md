@@ -16,6 +16,7 @@
 - [试用与迭代路线](docs/iteration-roadmap.md)
 - [MVP 验收记录](docs/mvp-review.md)
 - [话题与事项归属](docs/topics.md)
+- [开发环境、数据库隔离与发布流程](docs/development-and-release.md)
 
 ## 当前阶段
 
@@ -33,6 +34,7 @@
 10. 完成、延后、等待和放弃；
 11. PWA 安装和后台 Web Push 提醒。
 12. 创建话题 / 主题 / 专题，一个话题收纳多个事项；输入时手动选择或由 AI 自动判断，已有事项可以重新归类。
+13. 深浅两套主题，一键切换并记住浏览器偏好。
 
 例如输入“请创建一个关于星河项目的话题”，或进入“话题 → 新建话题”。在话题页记录内容会默认归入该话题；填写话题描述可以帮助 AI 判断归属。
 
@@ -46,7 +48,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-打开 `http://localhost:3000`。
+开发环境打开 `http://localhost:3001`，使用独立测试数据库。已有 `.env.local` 时不要重复复制示例文件覆盖 Key。
 
 在 `.env.local` 中配置 `DEEPSEEK_API_KEY` 后启用 AI 整理；未配置时会自动使用本地规则，不会丢失输入。
 
@@ -57,15 +59,18 @@ npm run build
 npm start
 ```
 
+正式环境打开 `http://localhost:3000`。开发用 `dev` 分支，发布用 `master` 分支；原 `main` 只保留为历史基线。数据库不会随 Git 切换而改变，由启动命令选择。
+
+旧项目升级：把 `.env.local` 的 `DATA_DIR` 改为 `DATA_ROOT`，停止旧服务后运行 `npm run db:migrate -- --confirm-stopped`。本机已完成迁移，原数据和截图仍保留作备份。
+
 回归测试（先构建）：`npm run build && npm test`。测试使用临时数据库和模拟模型，不会修改个人数据或消耗 DeepSeek 额度。
 
 ## 数据与隐私
 
-- 数据默认保存在 `data/app.db`；
-- 截图保存在 `data/uploads/`；
-- Web Push 密钥首次运行时生成在 `data/vapid.json`；
-- DeepSeek Key 只保存在 `.env.local`；
-- `data/` 和 `.env.local` 均已加入 `.gitignore`；
+- 正式数据保存在 `data/production/app.db`，测试 / 开发数据保存在 `data/development/app.db`；
+- 截图和 Web Push 密钥存放在对应环境目录的 `uploads/` 和 `vapid.json`；开发与自动化测试不发送提醒；
+- DeepSeek Key 保存在 `.env.local`，也可在 `.env.development.local` / `.env.production.local` 分别覆盖；
+- `data/`、真实环境配置和构建缓存均已加入 `.gitignore`，不随代码发布；
 - 调用 DeepSeek 整理输入时发送当前输入、最多六条本地预筛选的相关未完成事项摘要，以及最多 40 个话题的名称与描述，用于判断事项关联和话题归属；不会发送完整数据库。
 - 生成建议时只发送目标事项的标题、备注、时间和来源摘要。当前建议基于模型知识，不代表已经联网检索或核验；实时搜索与来源引用留待后续版本。
 

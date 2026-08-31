@@ -32,6 +32,8 @@ import {
 } from "react";
 import type { DashboardData, Item, NotebookNote, Topic } from "@/lib/types";
 import { TopicWorkspace } from "@/components/topic-workspace";
+import { ThemeToggle } from "@/components/theme-toggle";
+import type { AppEnvironment } from "@/lib/runtime-config.mjs";
 
 type Tab = "today" | "later" | "topics" | "notebook";
 type Toast = { message: string; tone: "success" | "error" | "neutral" } | null;
@@ -824,7 +826,7 @@ function NotebookPage({
   );
 }
 
-export function AppShell() {
+export function AppShell({ environment, remindersEnabled }: { environment: AppEnvironment; remindersEnabled: boolean }) {
   const [data, setData] = useState<DashboardData>(emptyDashboard);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("today");
@@ -894,6 +896,7 @@ export function AppShell() {
   }, []);
 
   const requestNotifications = async () => {
+    if (!remindersEnabled) return;
     if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
       setToast({ message: "当前浏览器不支持系统通知。", tone: "neutral" });
       return;
@@ -937,6 +940,7 @@ export function AppShell() {
             <small>LIFE NAVIGATOR</small>
           </span>
         </a>
+        {environment !== "production" && <span className="environment-badge" role="status">{environment === "development" ? "开发环境" : "自动化测试"} · 测试数据</span>}
         <nav className="main-nav" aria-label="主要页面">
           <button className={tab === "today" ? "active" : ""} onClick={() => navigate("today")}>
             <span className="nav-icon"><SunMedium size={16} /></span>
@@ -967,11 +971,13 @@ export function AppShell() {
           <span className={`ai-status ${data.aiEnabled ? "connected" : ""}`}>
             <span /> {data.aiEnabled ? "DeepSeek 已连接" : "本地整理"}
           </span>
+          <ThemeToggle />
           <button
             className={`notification-button ${notificationState === "granted" ? "enabled" : ""}`}
+            disabled={!remindersEnabled}
             onClick={() => void requestNotifications()}
-            title={notificationState === "granted" ? "系统提醒已开启" : "开启系统提醒"}
-            aria-label={notificationState === "granted" ? "系统提醒已开启" : "开启系统提醒"}
+            title={!remindersEnabled ? "当前环境不发送系统提醒" : notificationState === "granted" ? "系统提醒已开启" : "开启系统提醒"}
+            aria-label={!remindersEnabled ? "当前环境不发送系统提醒" : notificationState === "granted" ? "系统提醒已开启" : "开启系统提醒"}
           >
             <Bell size={18} />
           </button>

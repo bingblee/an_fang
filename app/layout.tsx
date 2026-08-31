@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { themeColors, themeInitScript } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: "安放 · 个人 AI 外部大脑",
@@ -15,14 +16,14 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  themeColor: "#f6f7f2",
-  colorScheme: "light"
+  themeColor: themeColors.light,
+  colorScheme: "light dark"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" data-theme="light" suppressHydrationWarning>
+      <head><script id="anfang-theme-init" dangerouslySetInnerHTML={{ __html: themeInitScript }} /></head>
       <body>{children}</body>
     </html>
   );

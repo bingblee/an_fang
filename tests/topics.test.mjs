@@ -8,6 +8,8 @@ import { DatabaseSync } from "node:sqlite";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { after, before, test } from "node:test";
+import { runInNewContext } from "node:vm";
+import { ensureDataDirectory, getRuntimeConfig } from "../lib/runtime-config.mjs";
 
 // Exercise the production routes against a disposable database and a deterministic
 // model endpoint. No real API key, user data, notifications, or external AI calls.
@@ -49,6 +51,7 @@ const latestPrompt = () => {
 
 before(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "anfang-topics-test-"));
+  ensureDataDirectory(getRuntimeConfig({ ANFANG_ENV: "test", TEST_DATA_DIR: dataDir }));
   const oldDb = new DatabaseSync(join(dataDir, "app.db"));
   // The pre-topic schema intentionally lacks topics, topic_id, topic_source, and merged_into_id.
   oldDb.exec(`
@@ -84,7 +87,7 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${port}`;
   app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-H", "127.0.0.1", "-p", String(port)], {
     cwd: process.cwd(),
-    env: { ...process.env, DATA_DIR: dataDir, DEEPSEEK_API_KEY: "test-only", DEEPSEEK_BASE_URL: `http://127.0.0.1:${modelPort}`, NEXT_TELEMETRY_DISABLED: "1" },
+    env: { ...process.env, ANFANG_ENV: "test", DATA_DIR: "", TEST_DATA_DIR: dataDir, DEEPSEEK_API_KEY: "test-only", DEEPSEEK_BASE_URL: `http://127.0.0.1:${modelPort}`, NEXT_TELEMETRY_DISABLED: "1" },
     stdio: ["ignore", "pipe", "pipe"]
   });
   let output = "";
@@ -114,10 +117,31 @@ test("legacy database migrates without altering existing tasks", async () => {
   assert.equal(result.status, 200);
   assert.deepEqual(result.body.topics, []);
   assert.equal(result.body.totalOpen, 1);
+  assert.equal(result.body.environment, "test");
+  assert.equal(result.body.remindersEnabled, false);
   assert.equal(result.body.later[0].id, legacyId);
   assert.equal(result.body.later[0].topicId, null);
   assert.equal(itemRow(legacyId).title, "原有事项，不要丢失");
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+});
+
+test("test UI is labeled, push is blocked, and the initial theme is restored before rendering", async () => {
+  assert.equal((await api("/api/push/public-key")).status, 403);
+  assert.equal((await api("/api/push/subscribe", "POST", {})).status, 403);
+  assert.equal((await api("/manifest.webmanifest")).body.short_name, "安放测试");
+  const html = await (await fetch(baseUrl)).text();
+  assert.match(html, /自动化测试/);
+  assert.ok(html.indexOf('id="anfang-theme-init"') < html.indexOf("<body"));
+  const script = html.match(/<script id="anfang-theme-init">([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  for (const saved of [null, "light", "dark", "invalid", "storage-disabled"]) {
+    const root = { dataset: {} };
+    const meta = { setAttribute(_name, value) { this.content = value; } };
+    runInNewContext(script, { document: { documentElement: root, querySelector: () => meta },
+      localStorage: { getItem() { if (saved === "storage-disabled") throw new Error("disabled"); return saved; } } });
+    assert.equal(root.dataset.theme, saved === "dark" ? "dark" : "light");
+    assert.equal(meta.content, saved === "dark" ? "#080d18" : "#f6f7f2");
+  }
 });
 
 test("topic creation, normalized duplicates, validation, and edit conflicts", async () => {

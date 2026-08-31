@@ -22,7 +22,60 @@
   --danger-wash: #fcf0e9;
   --danger-border: #e6c8bc;
   --shadow: 0 12px 38px rgba(53, 73, 55, 0.065);
+  --selection: #dcebcf;
+  --selection-ink: var(--text);
+  --brand-shadow: 0 4px 12px rgba(53, 73, 55, 0.1);
+  --focus-shadow: 0 16px 42px rgba(53, 73, 55, 0.08), 0 0 0 1px var(--signal-wash);
+  --button-shadow: 0 4px 12px rgba(53, 73, 55, 0.18);
+  --suggestion-hover: #e4efe8;
+  --mobile-rail: rgba(251, 252, 248, 0.96);
+  --mobile-shadow: 0 8px 30px rgba(53, 73, 55, 0.12);
   color-scheme: light;
+}
+
+/* The original “夜航生活控制台” palette, with readable secondary text. */
+:root[data-theme="dark"] {
+  --canvas: #080d18;
+  --canvas-muted: #050812;
+  --rail: #0b111e;
+  --panel: #101827;
+  --panel-raised: #151f31;
+  --hover: #192438;
+  --text: #f2f5ee;
+  --text-soft: #b1bac9;
+  --muted: #8d9ab1;
+  --faint: #8492aa;
+  --line: rgba(147, 164, 193, 0.16);
+  --line-strong: rgba(170, 190, 220, 0.3);
+  --signal: #d9ff68;
+  --signal-ink: #12180a;
+  --signal-wash: rgba(217, 255, 104, 0.1);
+  --signal-border: rgba(217, 255, 104, 0.3);
+  --cyan: #72e6d1;
+  --cyan-wash: rgba(114, 230, 209, 0.09);
+  --cyan-border: rgba(114, 230, 209, 0.24);
+  --danger: #ff8066;
+  --danger-wash: rgba(255, 128, 102, 0.1);
+  --danger-border: rgba(255, 128, 102, 0.3);
+  --shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
+  --selection: var(--signal);
+  --selection-ink: var(--signal-ink);
+  --brand-shadow: 0 4px 16px rgba(217, 255, 104, 0.1);
+  --focus-shadow: 0 18px 50px rgba(0, 0, 0, 0.35), 0 0 0 1px var(--signal-wash);
+  --button-shadow: 0 4px 20px rgba(217, 255, 104, 0.1);
+  --suggestion-hover: #152c32;
+  --mobile-rail: rgba(11, 17, 30, 0.96);
+  --mobile-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+[data-theme="dark"] body {
+  background:
+    linear-gradient(rgba(120, 146, 183, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 146, 183, 0.028) 1px, transparent 1px),
+    radial-gradient(circle at 67% -10%, rgba(66, 108, 138, 0.2), transparent 34rem),
+    var(--canvas);
+  background-size: 44px 44px, 44px 44px, auto, auto;
 }
 
 * { box-sizing: border-box; }
@@ -55,8 +108,8 @@ a:focus-visible {
 }
 
 ::selection {
-  color: var(--text);
-  background: #dcebcf;
+  color: var(--selection-ink);
+  background: var(--selection);
 }
 
 .app-frame { min-height: 100vh; }
@@ -95,7 +148,7 @@ a:focus-visible {
   font-size: 19px;
   font-weight: 700;
   line-height: 1;
-  box-shadow: 0 4px 12px rgba(53, 73, 55, 0.1);
+  box-shadow: var(--brand-shadow);
   clip-path: polygon(0 0, 100% 0, 100% 74%, 74% 100%, 0 100%);
 }
 
@@ -188,7 +241,7 @@ a:focus-visible {
   margin-top: auto;
   padding-top: 18px;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 8px;
   border-top: 1px solid var(--line);
@@ -215,7 +268,7 @@ a:focus-visible {
   box-shadow: 0 0 0 4px var(--cyan-wash);
 }
 
-.notification-button {
+.notification-button, .theme-toggle {
   width: 34px;
   height: 34px;
   padding: 0;
@@ -230,10 +283,24 @@ a:focus-visible {
 }
 
 .notification-button:hover,
-.notification-button.enabled {
+.notification-button.enabled,
+.theme-toggle:hover {
   border-color: var(--signal-border);
   background: var(--signal-wash);
   color: var(--signal);
+}
+
+.notification-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.environment-badge {
+  width: fit-content;
+  margin-top: 18px;
+  padding: 5px 8px;
+  border: 1px solid var(--danger-border);
+  border-radius: 4px;
+  background: var(--danger-wash);
+  color: var(--danger);
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .main-content {
@@ -365,7 +432,7 @@ a:focus-visible {
 
 .capture:focus-within {
   border-color: var(--signal);
-  box-shadow: 0 16px 42px rgba(53, 73, 55, 0.08), 0 0 0 1px var(--signal-wash);
+  box-shadow: var(--focus-shadow);
   transform: translateY(-2px);
 }
 
@@ -490,7 +557,7 @@ a:focus-visible {
 }
 
 .place-button:hover:not(:disabled) {
-  box-shadow: 0 4px 12px rgba(53, 73, 55, 0.18);
+  box-shadow: var(--button-shadow);
   transform: translateY(-1px);
 }
 
@@ -683,7 +750,7 @@ a:focus-visible {
   cursor: pointer;
 }
 
-.suggestion-peek:hover { border-color: var(--cyan); background: #e4efe8; }
+.suggestion-peek:hover { border-color: var(--cyan); background: var(--suggestion-hover); }
 
 .suggestion-peek-mark {
   display: inline-flex;
@@ -1270,7 +1337,8 @@ a:focus-visible {
   .brand-stamp { width: 34px; height: 34px; font-size: 17px; }
   .brand-copy small, .main-nav, .ai-status { display: none; }
   .brand-copy strong { font-size: 14px; }
-  .top-actions { margin: 0; padding: 0; display: block; border: 0; }
+  .top-actions { margin: 0; padding: 0; display: flex; border: 0; }
+  .environment-badge { margin: 0 8px; padding: 5px 6px; font-size: 9px; }
 
   .main-content {
     width: 100%;
@@ -1335,8 +1403,8 @@ a:focus-visible {
     grid-template-columns: repeat(4, 1fr);
     border: 1px solid var(--line-strong);
     border-radius: 8px;
-    background: rgba(251, 252, 248, 0.96);
-    box-shadow: 0 8px 30px rgba(53, 73, 55, 0.12);
+    background: var(--mobile-rail);
+    box-shadow: var(--mobile-shadow);
     backdrop-filter: blur(20px);
   }
 

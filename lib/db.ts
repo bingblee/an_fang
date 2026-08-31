@@ -1,14 +1,11 @@
-import { mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Item, ItemEnrichment, NotebookNote } from "@/lib/types";
+import { ensureDataDirectory, getRuntimeConfig } from "@/lib/runtime-config.mjs";
 
-export const dataDir = resolve(
-  /* turbopackIgnore: true */ process.cwd(),
-  process.env.DATA_DIR || "data"
-);
+const runtimeConfig = getRuntimeConfig(process.env, /* turbopackIgnore: true */ process.cwd());
+export const dataDir = runtimeConfig.dataDir;
 export const uploadsDir = join(dataDir, "uploads");
-mkdirSync(uploadsDir, { recursive: true });
 
 declare global {
   var __anfangDb: DatabaseSync | undefined;
@@ -221,6 +218,7 @@ function initialize(db: DatabaseSync) {
 
 export function getDb() {
   if (!globalThis.__anfangDb) {
+    ensureDataDirectory(runtimeConfig);
     const db = new DatabaseSync(join(dataDir, "app.db"));
     initialize(db);
     globalThis.__anfangDb = db;

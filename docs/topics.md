@@ -36,7 +36,7 @@ npm test
 
 测试启动独立 Next.js 服务、临时 SQLite 数据库与模拟模型服务；不使用真实 Key、不读取用户数据库、不发送系统通知。覆盖旧库迁移、自然语言创建、手动优先、自动归属、跨话题合并保护、截图、来源与提醒、建议及笔记副本、完成统计和本地降级。
 
-`KEEP_TEST_DATA=1 npm test` 可以保留临时测试库，路径在测试结束时打印，用于界面复核。不要把测试库配置为正式数据目录。
+`KEEP_TEST_DATA=1 npm test` 可以保留临时测试库，路径在测试结束时打印，用于界面复核。测试服务使用 `ANFANG_ENV=test` 和 `TEST_DATA_DIR`，不要把测试库配置为正式数据目录；日常开发用 `npm run dev`，详见[开发与发布](development-and-release.md)。
 
 ## 后续可迭代
 
