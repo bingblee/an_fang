@@ -13,6 +13,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("waiting") }),
   z.object({ action: z.literal("later") }),
   z.object({ action: z.literal("snooze"), preset: z.string().min(1) }),
+  z.object({ action: z.literal("set_topic"), topicId: z.string().uuid().nullable() }),
   z.object({
     action: z.literal("edit"),
     title: z.string().min(1).max(120),
@@ -26,7 +27,7 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
-  const parsed = actionSchema.safeParse(await request.json());
+  const parsed = actionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "操作参数不正确。" }, { status: 400 });
   }
@@ -41,7 +42,13 @@ export async function PATCH(
 
   const now = new Date().toISOString();
   const action = parsed.data;
-  if (action.action === "complete") {
+  if (action.action === "set_topic") {
+    if (action.topicId && !db.prepare("SELECT id FROM topics WHERE id = ?").get(action.topicId)) {
+      return NextResponse.json({ error: "话题不存在，请刷新后重试。" }, { status: 404 });
+    }
+    db.prepare("UPDATE items SET topic_id = ?, topic_source = 'manual', updated_at = ? WHERE id = ?")
+      .run(action.topicId, now, id);
+  } else if (action.action === "complete") {
     db.prepare(
       "UPDATE items SET status = 'completed', completed_at = ?, updated_at = ? WHERE id = ?"
     ).run(now, now, id);
@@ -124,7 +131,7 @@ export async function PATCH(
     randomUUID(),
     id,
     action.action,
-    action.action === "edit" ? String(existing.scheduled_for || "") : null,
+    action.action === "edit" ? String(existing.scheduled_for || "") : action.action === "set_topic" ? String(existing.topic_id || "") : null,
     JSON.stringify(action),
     now
   );

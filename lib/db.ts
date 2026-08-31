@@ -52,6 +52,15 @@ function initialize(db: DatabaseSync) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS topics (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      name_key TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS items (
       id TEXT PRIMARY KEY,
       capture_id TEXT NOT NULL REFERENCES captures(id) ON DELETE CASCADE,
@@ -193,6 +202,13 @@ function initialize(db: DatabaseSync) {
   if (!itemColumns.some((column) => column.name === "merged_into_id")) {
     db.exec("ALTER TABLE items ADD COLUMN merged_into_id TEXT");
   }
+  if (!itemColumns.some((column) => column.name === "topic_id")) {
+    db.exec("ALTER TABLE items ADD COLUMN topic_id TEXT REFERENCES topics(id) ON DELETE SET NULL");
+  }
+  if (!itemColumns.some((column) => column.name === "topic_source")) {
+    db.exec("ALTER TABLE items ADD COLUMN topic_source TEXT");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_items_topic_status ON items(topic_id, status)");
   db.exec(`
     INSERT OR IGNORE INTO item_sources (item_id, capture_id, relation, created_at)
     SELECT id, capture_id, 'primary', created_at FROM items;
@@ -229,6 +245,9 @@ export function mapNotebookNote(row: ItemRow): NotebookNote {
 export function mapItem(row: ItemRow): Item {
   return {
     id: String(row.id),
+    topicId: row.topic_id ? String(row.topic_id) : null,
+    topicName: row.topic_name ? String(row.topic_name) : null,
+    topicSource: row.topic_source ? String(row.topic_source) as Item["topicSource"] : null,
     captureId: String(row.capture_id),
     title: String(row.title),
     notes: row.notes ? String(row.notes) : null,
@@ -277,7 +296,7 @@ export function mapItem(row: ItemRow): Item {
 }
 
 export const itemSelect = `
-  SELECT i.*,
+  SELECT i.*, topic.name AS topic_name,
          (SELECT COUNT(*) FROM item_sources source_count
           WHERE source_count.item_id = i.id) AS source_count,
          (SELECT COUNT(*) FROM item_enrichments enrichment_count
@@ -295,6 +314,7 @@ export const itemSelect = `
          a.mime_type,
          a.original_name
   FROM items i
+  LEFT JOIN topics topic ON topic.id = i.topic_id
   LEFT JOIN item_enrichments enrichment ON enrichment.id = (
     SELECT latest_enrichment.id
     FROM item_enrichments latest_enrichment

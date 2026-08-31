@@ -3,6 +3,7 @@ import type { MergeCandidate } from "@/lib/types";
 
 type CandidateRow = {
   id: string;
+  topic_id: string | null;
   title: string;
   notes: string | null;
   category: MergeCandidate["category"];
@@ -100,7 +101,7 @@ function scoreCandidate(input: string, row: CandidateRow) {
   return Math.min(1, semanticScore + continuation + recency);
 }
 
-export function findMergeCandidates(db: DatabaseSync, input: string, hasImage = false) {
+export function findMergeCandidates(db: DatabaseSync, input: string, hasImage = false, topicChoice = "auto") {
   const explicitReference =
     /(?:怎么做|做法|方法|攻略|给.*建议|查找|查询|搜一下|清单|步骤|教程|备注在|附在|放到.*(?:事项|任务))/i.test(
       input
@@ -109,19 +110,21 @@ export function findMergeCandidates(db: DatabaseSync, input: string, hasImage = 
   const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
   const rows = db
     .prepare(
-      `SELECT id, title, notes, category, status, scheduled_for, time_window,
+      `SELECT id, topic_id, title, notes, category, status, scheduled_for, time_window,
               person, context_label, source_excerpt, updated_at
        FROM items
        WHERE status IN ('scheduled', 'waiting', 'later')
          AND updated_at >= ?
+         AND (? = 'auto' OR (? = 'none' AND topic_id IS NULL) OR topic_id = ? OR (? NOT IN ('auto', 'none') AND topic_id IS NULL))
        ORDER BY updated_at DESC
        LIMIT ${explicitReference ? 80 : 30}`
     )
-    .all(cutoff) as unknown as CandidateRow[];
+    .all(cutoff, topicChoice, topicChoice, topicChoice, topicChoice) as unknown as CandidateRow[];
 
   return rows
     .map((row) => ({
       id: row.id,
+      topicId: row.topic_id,
       title: row.title,
       notes: row.notes,
       category: row.category,

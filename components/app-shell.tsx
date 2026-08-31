@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   Clock3,
+  FolderOpen,
   ImagePlus,
   Inbox,
   LoaderCircle,
@@ -29,9 +30,10 @@ import {
   useRef,
   useState
 } from "react";
-import type { DashboardData, Item, NotebookNote } from "@/lib/types";
+import type { DashboardData, Item, NotebookNote, Topic } from "@/lib/types";
+import { TopicWorkspace } from "@/components/topic-workspace";
 
-type Tab = "today" | "later" | "notebook";
+type Tab = "today" | "later" | "topics" | "notebook";
 type Toast = { message: string; tone: "success" | "error" | "neutral" } | null;
 
 const emptyDashboard: DashboardData = {
@@ -41,6 +43,7 @@ const emptyDashboard: DashboardData = {
   waiting: [],
   inbox: [],
   notebook: [],
+  topics: [],
   completedToday: 0,
   totalOpen: 0,
   aiEnabled: false
@@ -95,10 +98,16 @@ function formatSchedule(value: string | null, windowLabel: string | null) {
 }
 
 function CaptureComposer({
-  onCaptured
+  onCaptured,
+  topics,
+  initialTopicId = "auto"
 }: {
-  onCaptured: (message: string, usedAI: boolean) => void;
+  onCaptured: (message: string, usedAI: boolean, topicOnly?: boolean) => void;
+  topics: Topic[];
+  initialTopicId?: string;
 }) {
+  const [topicChoice, setTopicChoice] = useState(initialTopicId);
+  const [justCreated, setJustCreated] = useState<Topic | null>(null);
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -122,7 +131,7 @@ function CaptureComposer({
   };
 
   const chooseFile = (candidate?: File) => {
-    if (!candidate) return;
+    if (!candidate || submitting) return;
     if (!candidate.type.startsWith("image/")) {
       setError("现在先支持图片截图。");
       return;
@@ -144,18 +153,25 @@ function CaptureComposer({
     try {
       const body = new FormData();
       body.set("text", text.trim());
+      body.set("topicId", topicChoice);
       if (file) body.set("attachment", file);
       const response = await fetch("/api/captures", { method: "POST", body });
       const result = (await response.json()) as {
         error?: string;
         message?: string;
         usedAI?: boolean;
+        kind?: string;
+        createdTopic?: Topic;
       };
       if (!response.ok) throw new Error(result.error || "暂时没有安放成功。");
       setText("");
       clearFile();
-      onCaptured(result.message || "已经替你记住了。", Boolean(result.usedAI));
-      textareaRef.current?.focus();
+      if (result.createdTopic && topicChoice === "auto") {
+        setJustCreated(result.createdTopic);
+        setTopicChoice(result.createdTopic.id);
+      }
+      onCaptured(result.message || "已经替你记住了。", Boolean(result.usedAI), result.kind === "topic");
+      textareaRef.current?.focus({ preventScroll: true });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "暂时没有安放成功。");
     } finally {
@@ -201,9 +217,10 @@ function CaptureComposer({
           if (pastedFile) chooseFile(pastedFile);
         }}
         rows={3}
-        autoFocus
+        autoFocus={initialTopicId === "auto"}
         placeholder="想到的事，先放在这里……"
         aria-label="记录一件事"
+        readOnly={submitting}
       />
 
       {preview && (
@@ -211,11 +228,24 @@ function CaptureComposer({
           {/* blob URL 只用于本地预览 */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={preview} alt="待上传的截图" />
-          <button type="button" onClick={clearFile} aria-label="移除截图">
+          <button type="button" onClick={clearFile} disabled={submitting} aria-label="移除截图">
             <X size={15} />
           </button>
         </div>
       )}
+
+      <label className="capture-topic">
+        <FolderOpen size={14} aria-hidden="true" />
+        <span>话题</span>
+        <select aria-label="归入话题" value={topicChoice} disabled={submitting}
+          onChange={(event) => setTopicChoice(event.target.value)}>
+          <option value="auto">AI 自动归类</option>
+          <option value="none">未归类</option>
+          {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
+          {justCreated && !topics.some((topic) => topic.id === justCreated.id) &&
+            <option value={justCreated.id}>{justCreated.name}</option>}
+        </select>
+      </label>
 
       <div className="capture-footer">
         <div className="capture-tools">
@@ -224,11 +254,14 @@ function CaptureComposer({
             type="file"
             accept="image/jpeg,image/png,image/gif,image/webp"
             hidden
+            disabled={submitting}
             onChange={(event) => chooseFile(event.target.files?.[0])}
           />
           <button
             type="button"
             className="quiet-button"
+            aria-label="添加截图"
+            disabled={submitting}
             onClick={() => inputRef.current?.click()}
           >
             <ImagePlus size={17} />
@@ -259,16 +292,21 @@ function CaptureComposer({
 
 function ItemCard({
   item,
-  onChange
+  onChange,
+  topics,
+  onOpenTopic
 }: {
   item: Item;
   onChange: (message?: string) => void;
+  topics: Topic[];
+  onOpenTopic: (id: string) => void;
 }) {
+  const completed = item.status === "completed";
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(item.needsConfirmation);
+  const [editing, setEditing] = useState(item.needsConfirmation && !completed);
   const [title, setTitle] = useState(item.title);
   const [dateValue, setDateValue] = useState(() => toLocalDateTime(item.scheduledFor));
 
@@ -424,12 +462,12 @@ function ItemCard({
   }
 
   return (
-    <article className={`item-card ${busy ? "is-busy" : ""}`}>
+    <article className={`item-card ${busy ? "is-busy" : ""} ${completed ? "is-completed" : ""}`}>
       <button
         className="complete-button"
-        disabled={busy}
+        disabled={busy || completed}
         onClick={() => void action({ action: "complete" }, "完成了，已经替你收好。")}
-        aria-label={`完成：${item.title}`}
+        aria-label={`${completed ? "已完成" : "完成"}：${item.title}`}
       >
         <Check size={16} />
       </button>
@@ -446,11 +484,18 @@ function ItemCard({
             onClick={beginEditing}
             aria-label={`修改时间：${formatSchedule(item.scheduledFor, item.timeWindow)}`}
             title="修改时间"
+            disabled={completed}
           >
             <Clock3 size={13} />
             {formatSchedule(item.scheduledFor, item.timeWindow)}
             <Pencil size={10} />
           </button>
+          {item.topicId && item.topicName && (
+            <button className="topic-badge" onClick={() => onOpenTopic(item.topicId!)}
+              title={item.topicSource === "ai" ? "AI 自动归类，可在更多操作中修改" : "查看这个话题"}>
+              <FolderOpen size={12} /> {item.topicName}
+            </button>
+          )}
           {metadata.map((meta) => (
             <span key={meta}>{meta}</span>
           ))}
@@ -472,6 +517,16 @@ function ItemCard({
 
         {expanded && (
           <div className="item-detail">
+            <label className="item-topic-editor">
+              <FolderOpen size={14} />
+              <span>所属话题</span>
+              <select aria-label={`调整话题：${item.title}`} value={item.topicId || "none"} disabled={busy}
+                onChange={(event) => void action({ action: "set_topic", topicId: event.target.value === "none" ? null : event.target.value }, "话题归属已更新。") }>
+                <option value="none">未归类</option>
+                {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
+              </select>
+              <small>{item.topicSource === "ai" ? "AI 归类" : item.topicSource === "rule" ? "名称匹配" : item.topicSource === "manual" ? "手动指定" : "尚未归类"}</small>
+            </label>
             {item.attachment && (
               <Image
                 src={`/api/attachments/${item.attachment.id}`}
@@ -511,7 +566,7 @@ function ItemCard({
                 </div>
               </aside>
             )}
-            <div className="item-actions">
+            {!completed && <div className="item-actions">
               <button className="suggestion-action" onClick={() => void requestSuggestion()}>
                 <Sparkles size={12} />
                 {item.enrichment ? "再给一条建议" : "给我建议"}
@@ -533,7 +588,7 @@ function ItemCard({
               <button className="danger-text" onClick={() => void action({ action: "abandon" })}>
                 不再处理
               </button>
-            </div>
+            </div>}
             {suggestionError && <p className="suggestion-error">{suggestionError}</p>}
             {actionError && <p className="suggestion-error">{actionError}</p>}
           </div>
@@ -556,13 +611,17 @@ function Section({
   eyebrow,
   items,
   onChange,
-  icon
+  icon,
+  topics,
+  onOpenTopic
 }: {
   title: string;
   eyebrow?: string;
   items: Item[];
   onChange: (message?: string) => void;
   icon?: React.ReactNode;
+  topics: Topic[];
+  onOpenTopic: (id: string) => void;
 }) {
   if (!items.length) return null;
   return (
@@ -577,7 +636,7 @@ function Section({
       </div>
       <div className="item-list">
         {items.map((item) => (
-          <ItemCard key={item.id} item={item} onChange={onChange} />
+          <ItemCard key={item.id} item={item} onChange={onChange} topics={topics} onOpenTopic={onOpenTopic} />
         ))}
       </div>
     </section>
@@ -769,6 +828,7 @@ export function AppShell() {
   const [data, setData] = useState<DashboardData>(emptyDashboard);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("today");
+  const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast>(null);
   const [notificationState, setNotificationState] = useState<NotificationPermission | "unsupported">(
     "unsupported"
@@ -802,15 +862,29 @@ export function AppShell() {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void refresh();
+      void refresh().catch(() => { /* Keep the last readable dashboard during a temporary disconnection. */ });
     }, 60_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
 
   const handleChange = (message?: string) => {
     if (message) setToast({ message, tone: "success" });
-    void refresh();
+    void refresh().catch(() => setToast({ message: "已保存，但列表刷新失败，请稍后重试。", tone: "error" }));
   };
+
+  const handleCaptured = (message: string, usedAI: boolean, topicOnly?: boolean) => {
+    handleChange(usedAI || topicOnly ? message : `${message}（已用本地规则整理）`);
+  };
+  const navigate = (next: Tab) => {
+    setTab(next);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+  const selectTopic = (id: string | null) => {
+    setActiveTopicId(id);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+  const openTopic = (id: string) => { selectTopic(id); navigate("topics"); };
+  const sectionProps = { topics: data.topics, onOpenTopic: openTopic, onChange: handleChange };
 
   const todayEmpty = !data.today.length && !data.quick.length && !data.inbox.length;
   const laterCount = data.later.length + data.waiting.length + data.inbox.length;
@@ -858,20 +932,35 @@ export function AppShell() {
       <header className="topbar">
         <a className="brand" href="#top" aria-label="安放首页">
           <span className="brand-stamp">安</span>
-          <span>安放</span>
+          <span className="brand-copy">
+            <strong>安放</strong>
+            <small>LIFE NAVIGATOR</small>
+          </span>
         </a>
         <nav className="main-nav" aria-label="主要页面">
-          <button className={tab === "today" ? "active" : ""} onClick={() => setTab("today")}>
-            今日
+          <button className={tab === "today" ? "active" : ""} onClick={() => navigate("today")}>
+            <span className="nav-icon"><SunMedium size={16} /></span>
+            <span className="nav-label">今日</span>
           </button>
-          <button className={tab === "later" ? "active" : ""} onClick={() => setTab("later")}>
-            稍后 {laterCount > 0 && <span>{laterCount}</span>}
+          <button className={tab === "later" ? "active" : ""} onClick={() => navigate("later")}>
+            <span className="nav-icon"><Clock3 size={16} /></span>
+            <span className="nav-label">稍后</span>
+            {laterCount > 0 && <span className="nav-count">{laterCount}</span>}
+          </button>
+          <button
+            className={tab === "topics" ? "active" : ""}
+            onClick={() => { selectTopic(null); navigate("topics"); }}
+          >
+            <span className="nav-icon"><FolderOpen size={16} /></span>
+            <span className="nav-label">话题</span>
           </button>
           <button
             className={tab === "notebook" ? "active" : ""}
-            onClick={() => setTab("notebook")}
+            onClick={() => navigate("notebook")}
           >
-            笔记 {data.notebook.length > 0 && <span>{data.notebook.length}</span>}
+            <span className="nav-icon"><BookOpen size={16} /></span>
+            <span className="nav-label">笔记</span>
+            {data.notebook.length > 0 && <span className="nav-count">{data.notebook.length}</span>}
           </button>
         </nav>
         <div className="top-actions">
@@ -892,21 +981,21 @@ export function AppShell() {
       <main id="top" className="main-content">
         {tab === "today" ? (
           <>
-            <section className="welcome">
-              <p className="date-line">{dateHeading()}</p>
-              <h1>{greeting}，今天想安放什么？</h1>
-              <p className="welcome-note">你只管记下来，整理和重新想起交给我。</p>
-            </section>
+            <section className="today-deck">
+              <section className="welcome">
+                <p className="date-line">{dateHeading()}</p>
+                <h1>{greeting}，今天想安放什么？</h1>
+                <div className="hero-readout" aria-label="今日概览">
+                  <span><strong>{data.today.length + data.quick.length}</strong> 今天</span>
+                  <span><strong>{data.totalOpen}</strong> 替你记着</span>
+                </div>
+              </section>
 
-            <CaptureComposer
-              onCaptured={(message, usedAI) => {
-                setToast({
-                  message: usedAI ? message : `${message}（已用本地规则整理）`,
-                  tone: "success"
-                });
-                void refresh();
-              }}
-            />
+              <CaptureComposer
+                topics={data.topics}
+                onCaptured={handleCaptured}
+              />
+            </section>
 
             {loading ? (
               <div className="page-loading">
@@ -915,6 +1004,7 @@ export function AppShell() {
             ) : (
               <div className="sections-wrap">
                 <Section
+                  {...sectionProps}
                   title="需要你确认"
                   eyebrow="AI 没有替你猜"
                   items={data.inbox}
@@ -922,6 +1012,7 @@ export function AppShell() {
                   icon={<Inbox size={17} />}
                 />
                 <Section
+                  {...sectionProps}
                   title="今天要紧的事"
                   eyebrow="先把有限的注意力留给这里"
                   items={data.today}
@@ -929,6 +1020,7 @@ export function AppShell() {
                   icon={<SunMedium size={17} />}
                 />
                 <Section
+                  {...sectionProps}
                   title="顺手处理"
                   eyebrow="适合短暂空闲"
                   items={data.quick}
@@ -953,6 +1045,7 @@ export function AppShell() {
               <p>事情留在这里，不会因为暂时做不了而消失。</p>
             </div>
             <Section
+              {...sectionProps}
               title="等待中"
               eyebrow="条件满足后再继续"
               items={data.waiting}
@@ -960,12 +1053,14 @@ export function AppShell() {
               icon={<Users size={17} />}
             />
             <Section
+              {...sectionProps}
               title="需要确认"
               items={data.inbox}
               onChange={handleChange}
               icon={<Inbox size={17} />}
             />
             <Section
+              {...sectionProps}
               title="稍后再做"
               eyebrow="系统会在每日回顾中让它们重新出现"
               items={data.later}
@@ -980,6 +1075,13 @@ export function AppShell() {
               </div>
             )}
           </section>
+        ) : tab === "topics" ? (
+          loading ? <div className="page-loading"><LoaderCircle className="spin" size={20} /> 正在打开话题</div> :
+          <TopicWorkspace topics={data.topics} selectedId={activeTopicId} onSelect={selectTopic} onChange={handleChange}
+            renderCapture={(topicId) => <CaptureComposer key={topicId} topics={data.topics} initialTopicId={topicId} onCaptured={handleCaptured} />}
+            renderItems={(items, completed) => <Section {...sectionProps} title={completed ? "已完成" : "待处理"} items={items}
+              icon={completed ? <Check size={17} /> : <FolderOpen size={17} />} />}
+          />
         ) : (
           <NotebookPage notes={data.notebook} onChange={handleChange} />
         )}
@@ -1003,15 +1105,21 @@ export function AppShell() {
       </main>
 
       <nav className="mobile-nav" aria-label="移动端页面">
-        <button className={tab === "today" ? "active" : ""} onClick={() => setTab("today")}>
+        <button className={tab === "today" ? "active" : ""} onClick={() => navigate("today")}>
           <SunMedium size={19} />今日
         </button>
-        <button className={tab === "later" ? "active" : ""} onClick={() => setTab("later")}>
+        <button className={tab === "later" ? "active" : ""} onClick={() => navigate("later")}>
           <Clock3 size={19} />稍后
         </button>
         <button
+          className={tab === "topics" ? "active" : ""}
+          onClick={() => { selectTopic(null); navigate("topics"); }}
+        >
+          <FolderOpen size={19} />话题
+        </button>
+        <button
           className={tab === "notebook" ? "active" : ""}
-          onClick={() => setTab("notebook")}
+          onClick={() => navigate("notebook")}
         >
           <BookOpen size={19} />笔记
         </button>

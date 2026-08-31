@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb, itemSelect, mapItem, mapNotebookNote } from "@/lib/db";
 import type { DashboardData } from "@/lib/types";
+import { listTopics } from "@/lib/topics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +58,7 @@ export async function GET() {
     .get(startOfToday.toISOString()) as { count: number };
 
   const data: DashboardData = {
+    topics: listTopics(db),
     today,
     quick,
     later,

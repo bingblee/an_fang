@@ -7,6 +7,9 @@ import { resolveSchedule } from "@/lib/date";
 import { createItemEnrichment } from "@/lib/enrichment";
 import { extractCapture } from "@/lib/extraction";
 import { findMergeCandidates } from "@/lib/merge-candidates";
+import { canMergeIntoTopic, createTopic, listTopics, parseTopicCommand, resolveTopicAssignment, topicContext } from "@/lib/topics";
+import type { Topic, TopicSource } from "@/lib/types";
+import { z } from "zod";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -67,8 +70,13 @@ function addTrigger(
 }
 
 export async function POST(request: NextRequest) {
-  const formData = await request.formData();
+  const formData = await request.formData().catch(() => null);
+  if (!formData) return NextResponse.json({ error: "无法读取提交的内容。" }, { status: 400 });
   const text = String(formData.get("text") || "").trim();
+  const choiceInput = z.union([z.literal("auto"), z.literal("none"), z.string().uuid()])
+    .safeParse(formData.get("topicId") ?? "auto");
+  if (!choiceInput.success) return NextResponse.json({ error: "请选择有效的话题。" }, { status: 400 });
+  let topicChoice = choiceInput.data;
   const attachmentValue = formData.get("attachment");
   const attachment = attachmentValue instanceof File ? attachmentValue : null;
 
@@ -86,6 +94,10 @@ export async function POST(request: NextRequest) {
   }
 
   const db = getDb();
+  if (topicChoice !== "auto" && topicChoice !== "none" &&
+      !db.prepare("SELECT id FROM topics WHERE id = ?").get(topicChoice)) {
+    return NextResponse.json({ error: "这个话题不存在，请重新选择。" }, { status: 404 });
+  }
   const captureId = randomUUID();
   const createdAt = new Date().toISOString();
   const sourceUrl = text.match(/https?:\/\/[^\s]+/i)?.[0] || null;
@@ -100,8 +112,26 @@ export async function POST(request: NextRequest) {
   let attachmentRecord:
     | { id: string; mimeType: string; originalName: string; base64: string }
     | undefined;
+  let transactionOpen = false;
+  let createdTopic: Topic | null = null;
+  let processingText = text;
 
   try {
+    const command = parseTopicCommand(text);
+    if (command) {
+      const result = createTopic(db, { name: command.name, description: "" });
+      createdTopic = result.topic;
+      processingText = command.remainingText;
+      if (topicChoice === "auto") topicChoice = createdTopic.id;
+      if (!processingText && !attachment) {
+        db.prepare("UPDATE captures SET status = 'processed', processed_at = ? WHERE id = ?")
+          .run(new Date().toISOString(), captureId);
+        return NextResponse.json({
+          kind: "topic", createdTopic, usedAI: false,
+          message: result.created ? `已创建话题：${createdTopic.name}` : `话题「${createdTopic.name}」已存在，可以继续记录。`
+        });
+      }
+    }
     if (attachment) {
       const bytes = Buffer.from(await attachment.arrayBuffer());
       const date = new Date();
@@ -136,14 +166,23 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    const candidates = findMergeCandidates(db, text, Boolean(attachmentRecord));
+    const topics = listTopics(db);
+    const context = topicContext(topics, processingText, topicChoice);
+    const candidates = findMergeCandidates(db, processingText, Boolean(attachmentRecord), topicChoice);
     const extraction = await extractCapture(
-      text,
+      processingText,
       attachmentRecord
         ? { mimeType: attachmentRecord.mimeType, base64: attachmentRecord.base64 }
         : undefined,
-      candidates
+      candidates,
+      context,
+      topicChoice
     );
+    const assignmentInput = {
+      choice: topicChoice, topics, text: processingText,
+      aiTopicId: extraction.topicId, aiConfidence: extraction.topicConfidence
+    };
+    let assignment = resolveTopicAssignment(assignmentInput);
     const extracted = extraction.item;
     const schedule = resolveSchedule(extracted);
     const itemId = randomUUID();
@@ -152,7 +191,7 @@ export async function POST(request: NextRequest) {
     db.prepare(
       `INSERT INTO ai_extractions
         (id, capture_id, provider, model, prompt_version, result_json, confidence, error, created_at)
-       VALUES (?, ?, ?, ?, 'capture-v3-enrichment', ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, 'capture-v4-topics', ?, ?, ?, ?)`
     ).run(
       extractionId,
       captureId,
@@ -166,7 +205,10 @@ export async function POST(request: NextRequest) {
         mergeReason: extraction.mergeReason,
         enrichmentNeeded: extraction.enrichmentNeeded,
         enrichmentRequest: extraction.enrichmentRequest,
-        enrichmentConfidence: extraction.enrichmentConfidence
+        enrichmentConfidence: extraction.enrichmentConfidence,
+        topicId: extraction.topicId,
+        topicConfidence: extraction.topicConfidence,
+        topicChoice
       }),
       extracted.confidence,
       extraction.error || null,
@@ -177,7 +219,7 @@ export async function POST(request: NextRequest) {
       extraction.operation === "enrich"
         ? Math.max(extraction.mergeConfidence, extraction.enrichmentConfidence)
         : extraction.mergeConfidence;
-    const existingTarget =
+    let existingTarget =
       extraction.operation !== "create" &&
       extraction.mergeTargetId &&
       targetConfidence >= 0.72
@@ -189,13 +231,27 @@ export async function POST(request: NextRequest) {
             .get(extraction.mergeTargetId) as Record<string, string | number | null> | undefined)
         : undefined;
 
-    const sourceText = text.slice(0, 280) || (attachment ? "来自截图" : "");
+    if (existingTarget && !canMergeIntoTopic(
+      existingTarget.topic_id as string | null, topicChoice, assignment.topicId
+    )) existingTarget = undefined;
+    if (existingTarget) {
+      assignment = resolveTopicAssignment({
+        ...assignmentInput,
+        existing: { topicId: existingTarget.topic_id as string | null, source: existingTarget.topic_source as TopicSource }
+      });
+    }
+
+    const sourceText = processingText.slice(0, 280) || (attachment ? "来自截图" : "");
     let resultItemId: string = itemId;
     let merged = false;
     let enriched = false;
     let enrichmentProvider: "deepseek" | "local" | null = null;
     let enrichmentError: string | null = null;
 
+    // Keep the task, source links, topic, and reminders in one atomic update.
+    // Network calls happen outside the transaction so other captures can still be saved.
+    db.exec("BEGIN IMMEDIATE");
+    transactionOpen = true;
     if (existingTarget && extraction.operation === "enrich") {
       resultItemId = String(existingTarget.id);
       enriched = true;
@@ -205,15 +261,6 @@ export async function POST(request: NextRequest) {
          VALUES (?, ?, 'enrichment_request', ?)`
       ).run(resultItemId, captureId, createdAt);
       db.prepare("UPDATE items SET updated_at = ? WHERE id = ?").run(createdAt, resultItemId);
-      const enrichment = await createItemEnrichment({
-        db,
-        itemId: resultItemId,
-        captureId,
-        request: extraction.enrichmentRequest || text,
-        kind: "requested"
-      });
-      enrichmentProvider = enrichment.provider;
-      enrichmentError = enrichment.error;
     } else if (existingTarget && extraction.operation === "merge") {
       resultItemId = String(existingTarget.id);
       merged = true;
@@ -223,7 +270,7 @@ export async function POST(request: NextRequest) {
       const nextScheduledFor = hasScheduleUpdate
         ? schedule.scheduledFor
         : existingTarget.scheduled_for;
-      const nextNotes = combineText(existingTarget.notes, extracted.notes, text);
+      const nextNotes = combineText(existingTarget.notes, extracted.notes, processingText);
       const nextSourceExcerpt = combineText(
         existingTarget.source_excerpt,
         sourceText,
@@ -313,6 +360,20 @@ export async function POST(request: NextRequest) {
       ).run(itemId, captureId, createdAt);
       addTrigger(db, itemId, schedule, extracted.contextLabel, createdAt);
     }
+    db.prepare("UPDATE items SET topic_id = ?, topic_source = ? WHERE id = ?")
+      .run(assignment.topicId, assignment.source, resultItemId);
+    db.exec("COMMIT");
+    transactionOpen = false;
+
+    if (existingTarget && extraction.operation === "enrich") {
+      const enrichment = await createItemEnrichment({
+        db, itemId: resultItemId, captureId,
+        request: extraction.enrichmentRequest || processingText,
+        kind: "requested"
+      });
+      enrichmentProvider = enrichment.provider;
+      enrichmentError = enrichment.error;
+    }
 
     if (
       !enriched &&
@@ -353,7 +414,8 @@ export async function POST(request: NextRequest) {
             : `已安放：${resultItem.title}`;
     return NextResponse.json({
       item: resultItem,
-      message,
+      message: resultItem.topicName ? `${message} · ${resultItem.topicName}` : message,
+      createdTopic,
       usedAI: extraction.provider === "deepseek" || enrichmentProvider === "deepseek",
       merged,
       enriched,
@@ -361,6 +423,7 @@ export async function POST(request: NextRequest) {
       fallbackReason: extraction.error || enrichmentError || null
     });
   } catch (error) {
+    if (transactionOpen) db.exec("ROLLBACK");
     db.prepare("UPDATE captures SET status = 'failed' WHERE id = ?").run(captureId);
     return NextResponse.json(
       {

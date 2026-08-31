@@ -17,6 +17,22 @@ export type ItemCategory =
 export type Priority = "urgent" | "high" | "normal" | "low";
 export type Energy = "low" | "medium" | "high";
 
+export type TopicSource = "manual" | "ai" | "rule" | null;
+
+export interface Topic {
+  id: string;
+  name: string;
+  description: string;
+  openCount: number;
+  completedCount: number;
+  createdAt: string;
+}
+
+export interface TopicDetail {
+  topic: Topic;
+  items: Item[];
+}
+
 export interface ItemEnrichment {
   id: string;
   kind: "requested" | "proactive";
@@ -40,6 +56,9 @@ export interface NotebookNote {
 
 export interface Item {
   id: string;
+  topicId: string | null;
+  topicName: string | null;
+  topicSource: TopicSource;
   captureId: string;
   title: string;
   notes: string | null;
@@ -72,6 +91,7 @@ export interface Item {
 
 export interface MergeCandidate {
   id: string;
+  topicId: string | null;
   title: string;
   notes: string | null;
   category: ItemCategory;
@@ -86,6 +106,7 @@ export interface MergeCandidate {
 }
 
 export interface DashboardData {
+  topics: Topic[];
   today: Item[];
   quick: Item[];
   later: Item[];
