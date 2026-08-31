@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb, itemSelect, mapItem, mapNotebookNote } from "@/lib/db";
 import type { DashboardData } from "@/lib/types";
 import { listTopics } from "@/lib/topics";
+import { listCategories } from "@/lib/categories";
 import { getRuntimeConfig } from "@/lib/runtime-config.mjs";
 
 export const runtime = "nodejs";
@@ -60,6 +61,7 @@ export async function GET() {
 
   const data: DashboardData = {
     topics: listTopics(db),
+    categories: listCategories(db),
     today,
     quick,
     later,

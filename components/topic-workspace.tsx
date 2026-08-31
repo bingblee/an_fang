@@ -59,13 +59,14 @@ function TopicForm({ topic, onSaved, onCancel }: {
   );
 }
 
-export function TopicWorkspace({ topics, selectedId, onSelect, onChange, renderCapture, renderItems }: {
+export function TopicWorkspace({ topics, selectedId, onSelect, onChange, renderCapture, renderItems, overviewExtra }: {
   topics: Topic[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onChange: (message?: string) => void;
   renderCapture: (topicId: string) => ReactNode;
   renderItems: (items: Item[], completed: boolean) => ReactNode;
+  overviewExtra?: ReactNode;
 }) {
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -150,6 +151,7 @@ export function TopicWorkspace({ topics, selectedId, onSelect, onChange, renderC
         </button>
       </div>
       {creating && <TopicForm onSaved={saved} onCancel={() => setCreating(false)} />}
+      {overviewExtra}
       {topics.length ? <div className="topic-grid">
         {topics.map((topic) => <button className="topic-card" key={topic.id} onClick={() => onSelect(topic.id)}>
           <div className="topic-card-heading"><FolderOpen size={18} /><ArrowUpRight size={16} /></div>

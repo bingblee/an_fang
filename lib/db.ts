@@ -205,7 +205,11 @@ function initialize(db: DatabaseSync) {
   if (!itemColumns.some((column) => column.name === "topic_source")) {
     db.exec("ALTER TABLE items ADD COLUMN topic_source TEXT");
   }
+  if (!itemColumns.some((column) => column.name === "category_manual")) {
+    db.exec("ALTER TABLE items ADD COLUMN category_manual INTEGER NOT NULL DEFAULT 0");
+  }
   db.exec("CREATE INDEX IF NOT EXISTS idx_items_topic_status ON items(topic_id, status)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_items_category_status ON items(category, status)");
   db.exec(`
     INSERT OR IGNORE INTO item_sources (item_id, capture_id, relation, created_at)
     SELECT id, capture_id, 'primary', created_at FROM items;
@@ -250,6 +254,7 @@ export function mapItem(row: ItemRow): Item {
     title: String(row.title),
     notes: row.notes ? String(row.notes) : null,
     category: String(row.category) as Item["category"],
+    categoryManual: Boolean(row.category_manual),
     status: String(row.status) as Item["status"],
     priority: String(row.priority) as Item["priority"],
     durationMinutes:

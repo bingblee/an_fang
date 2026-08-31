@@ -9,6 +9,7 @@ import {
   FolderOpen,
   ImagePlus,
   Inbox,
+  Layers3,
   LoaderCircle,
   MoreHorizontal,
   Paperclip,
@@ -30,10 +31,12 @@ import {
   useRef,
   useState
 } from "react";
-import type { DashboardData, Item, NotebookNote, Topic } from "@/lib/types";
+import type { DashboardData, Item, ItemCategory, NotebookNote, Topic } from "@/lib/types";
 import { TopicWorkspace } from "@/components/topic-workspace";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { AppEnvironment } from "@/lib/runtime-config.mjs";
+import { categoryIds, categoryLabels } from "@/lib/category-definitions";
+import { CategoryShortcuts, CategoryWorkspace } from "@/components/category-workspace";
 
 type Tab = "today" | "later" | "topics" | "notebook";
 type Toast = { message: string; tone: "success" | "error" | "neutral" } | null;
@@ -46,6 +49,7 @@ const emptyDashboard: DashboardData = {
   inbox: [],
   notebook: [],
   topics: [],
+  categories: [],
   completedToday: 0,
   totalOpen: 0,
   aiEnabled: false
@@ -296,12 +300,14 @@ function ItemCard({
   item,
   onChange,
   topics,
-  onOpenTopic
+  onOpenTopic,
+  onOpenCategory
 }: {
   item: Item;
   onChange: (message?: string) => void;
   topics: Topic[];
   onOpenTopic: (id: string) => void;
+  onOpenCategory: (id: ItemCategory) => void;
 }) {
   const completed = item.status === "completed";
   const [busy, setBusy] = useState(false);
@@ -309,6 +315,7 @@ function ItemCard({
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState(item.needsConfirmation && !completed);
+  const [editingTitle, setEditingTitle] = useState(false);
   const [title, setTitle] = useState(item.title);
   const [dateValue, setDateValue] = useState(() => toLocalDateTime(item.scheduledFor));
 
@@ -340,13 +347,25 @@ function ItemCard({
     setEditing(true);
   };
 
+  const beginTitleEdit = () => {
+    setTitle(item.title);
+    setActionError(null);
+    setEditingTitle(true);
+  };
+
+  const saveTitle = async (event: FormEvent) => {
+    event.preventDefault();
+    if (busy || !title.trim()) return;
+    if (await action({ action: "rename", title: title.trim() }, "标题已更新，时间和状态保持不变。")) setEditingTitle(false);
+  };
+
   const saveEdit = async () => {
     const saved = await action(
       {
         action: "edit",
         title: title.trim(),
         scheduledFor: dateValue ? new Date(dateValue).toISOString() : null,
-        status: dateValue ? "scheduled" : "later"
+        status: dateValue ? "scheduled" : item.status === "waiting" ? "waiting" : "later"
       },
       "时间已经按你的修改更新。"
     );
@@ -402,11 +421,33 @@ function ItemCard({
 
   const metadata = [
     item.person ? `与 ${item.person}` : null,
-    item.contextLabel,
+    // The former AI context labels sometimes repeated the category verbatim.
+    item.contextLabel && !Object.values(categoryLabels).includes(item.contextLabel) ? item.contextLabel : null,
     item.durationMinutes ? `${item.durationMinutes} 分钟` : null,
     item.sourceCount > 1 ? `${item.sourceCount} 条关联信息` : null,
     item.enrichmentCount ? `${item.enrichmentCount} 条 AI 建议` : null
   ].filter(Boolean);
+
+  if (editingTitle) {
+    return <article className="item-card title-edit-card">
+      <form onSubmit={(event) => void saveTitle(event)}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) { if (event.key === "Enter") event.preventDefault(); return; }
+          if (event.key === "Escape" && !busy) setEditingTitle(false);
+        }}>
+        <label><span>事项标题</span>
+          <input className="edit-title" aria-label="事项标题" value={title} maxLength={120} autoFocus disabled={busy}
+            onChange={(event) => setTitle(event.target.value)} />
+        </label>
+        <p className="title-edit-hint">只改标题，不改变提醒时间、分类和完成状态。</p>
+        <div className="confirm-actions">
+          <button className="primary-small" disabled={busy || !title.trim()}>{busy ? "正在保存…" : "保存标题"}</button>
+          <button type="button" className="text-button" disabled={busy} onClick={() => setEditingTitle(false)}>取消</button>
+        </div>
+        {actionError && <p className="suggestion-error" role="alert">{actionError}</p>}
+      </form>
+    </article>;
+  }
 
   if (editing) {
     return (
@@ -432,6 +473,8 @@ function ItemCard({
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           aria-label="事项标题"
+          maxLength={120}
+          disabled={busy}
         />
         <label className="date-field">
           <span>什么时候再出现</span>
@@ -475,7 +518,10 @@ function ItemCard({
       </button>
       <div className="item-main">
         <div className="item-title-row">
-          <h3>{item.title}</h3>
+          <h3 aria-label={item.title}><button className="item-title-button" onClick={beginTitleEdit} disabled={busy}
+            title="编辑标题" aria-label={`编辑标题：${item.title}`}>
+            <span>{item.title}</span><Pencil size={12} aria-hidden="true" />
+          </button></h3>
           {item.priority === "urgent" || item.priority === "high" ? (
             <span className="priority-dot" title="需要关注" />
           ) : null}
@@ -486,11 +532,16 @@ function ItemCard({
             onClick={beginEditing}
             aria-label={`修改时间：${formatSchedule(item.scheduledFor, item.timeWindow)}`}
             title="修改时间"
-            disabled={completed}
+            disabled={busy || completed}
           >
             <Clock3 size={13} />
             {formatSchedule(item.scheduledFor, item.timeWindow)}
             <Pencil size={10} />
+          </button>
+          <button className="category-badge" onClick={() => onOpenCategory(item.category)}
+            aria-label={`查看${categoryLabels[item.category]}合集`}
+            title={`${item.categoryManual ? "手动分类" : "自动分类"} · 查看合集`}>
+            <Layers3 size={12} /> {categoryLabels[item.category]}
           </button>
           {item.topicId && item.topicName && (
             <button className="topic-badge" onClick={() => onOpenTopic(item.topicId!)}
@@ -519,6 +570,14 @@ function ItemCard({
 
         {expanded && (
           <div className="item-detail">
+            <label className="item-topic-editor">
+              <Layers3 size={14} /><span>所属分类</span>
+              <select aria-label={`调整分类：${item.title}`} value={item.category} disabled={busy}
+                onChange={(event) => void action({ action: "set_category", category: event.target.value }, "分类已更新；之后补充内容会保留你的选择。") }>
+                {categoryIds.map((id) => <option key={id} value={id}>{categoryLabels[id]}</option>)}
+              </select>
+              <small>{item.categoryManual ? "手动指定" : "自动识别，可修改"}</small>
+            </label>
             <label className="item-topic-editor">
               <FolderOpen size={14} />
               <span>所属话题</span>
@@ -615,7 +674,8 @@ function Section({
   onChange,
   icon,
   topics,
-  onOpenTopic
+  onOpenTopic,
+  onOpenCategory
 }: {
   title: string;
   eyebrow?: string;
@@ -624,6 +684,7 @@ function Section({
   icon?: React.ReactNode;
   topics: Topic[];
   onOpenTopic: (id: string) => void;
+  onOpenCategory: (id: ItemCategory) => void;
 }) {
   if (!items.length) return null;
   return (
@@ -638,7 +699,7 @@ function Section({
       </div>
       <div className="item-list">
         {items.map((item) => (
-          <ItemCard key={item.id} item={item} onChange={onChange} topics={topics} onOpenTopic={onOpenTopic} />
+          <ItemCard key={item.id} item={item} onChange={onChange} topics={topics} onOpenTopic={onOpenTopic} onOpenCategory={onOpenCategory} />
         ))}
       </div>
     </section>
@@ -831,6 +892,8 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("today");
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = useState<ItemCategory | null>(null);
+  const [collectionReturn, setCollectionReturn] = useState<{ tab: Tab; topicId: string | null }>({ tab: "topics", topicId: null });
   const [toast, setToast] = useState<Toast>(null);
   const [notificationState, setNotificationState] = useState<NotificationPermission | "unsupported">(
     "unsupported"
@@ -878,6 +941,7 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
     handleChange(usedAI || topicOnly ? message : `${message}（已用本地规则整理）`);
   };
   const navigate = (next: Tab) => {
+    setActiveCategory(null);
     setTab(next);
     window.scrollTo({ top: 0, behavior: "instant" });
   };
@@ -886,7 +950,19 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
     window.scrollTo({ top: 0, behavior: "instant" });
   };
   const openTopic = (id: string) => { selectTopic(id); navigate("topics"); };
-  const sectionProps = { topics: data.topics, onOpenTopic: openTopic, onChange: handleChange };
+  const openCategory = (id: ItemCategory) => {
+    if (!activeCategory) setCollectionReturn({ tab, topicId: activeTopicId });
+    setActiveCategory(id);
+    setTab("topics");
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+  const closeCategory = () => {
+    setActiveCategory(null);
+    setTab(collectionReturn.tab);
+    setActiveTopicId(collectionReturn.topicId);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
+  const sectionProps = { topics: data.topics, onOpenTopic: openTopic, onOpenCategory: openCategory, onChange: handleChange };
 
   const todayEmpty = !data.today.length && !data.quick.length && !data.inbox.length;
   const laterCount = data.later.length + data.waiting.length + data.inbox.length;
@@ -985,7 +1061,13 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
       </header>
 
       <main id="top" className="main-content">
-        {tab === "today" ? (
+        {activeCategory ? (
+          <CategoryWorkspace categories={data.categories} selectedId={activeCategory} onSelect={openCategory} onBack={closeCategory}
+            backLabel={collectionReturn.tab === "today" ? "返回今日" : collectionReturn.tab === "later" ? "返回稍后" : collectionReturn.topicId ? "返回话题" : "全部话题"}
+            renderItems={(items, completed) => <Section {...sectionProps} title={completed ? "已完成" : "待处理"} items={items}
+              icon={completed ? <Check size={17} /> : <Layers3 size={17} />} />}
+          />
+        ) : tab === "today" ? (
           <>
             <section className="today-deck">
               <section className="welcome">
@@ -1084,6 +1166,7 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
         ) : tab === "topics" ? (
           loading ? <div className="page-loading"><LoaderCircle className="spin" size={20} /> 正在打开话题</div> :
           <TopicWorkspace topics={data.topics} selectedId={activeTopicId} onSelect={selectTopic} onChange={handleChange}
+            overviewExtra={<CategoryShortcuts categories={data.categories} onSelect={openCategory} />}
             renderCapture={(topicId) => <CaptureComposer key={topicId} topics={data.topics} initialTopicId={topicId} onCaptured={handleCaptured} />}
             renderItems={(items, completed) => <Section {...sectionProps} title={completed ? "已完成" : "待处理"} items={items}
               icon={completed ? <Check size={17} /> : <FolderOpen size={17} />} />}

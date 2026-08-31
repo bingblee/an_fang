@@ -334,3 +334,120 @@ test("invalid topic choices fail before saving; all stored relations remain vali
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM captures WHERE status != 'processed'").get().n, 0);
 });
+
+test("title-only edits preserve exact reminders, confirmation state, source and topic", async () => {
+  const created = await capture("给星河项目购买烘焙奶酪", topicA.id, {
+    title: "购买烘焙奶酪", category: "shopping", specificTime: "2030-09-03T18:15:37+08:00",
+    timeWindow: "下班后", contextLabel: "外出购物", needsConfirmation: true, confirmationQuestion: "要买多少？"
+  });
+  assert.equal(created.status, 200);
+  const id = created.body.item.id;
+  const before = itemRow(id);
+  const triggers = db.prepare("SELECT * FROM triggers WHERE item_id = ?").all(id);
+  const source = db.prepare("SELECT * FROM captures WHERE id = ?").get(before.capture_id);
+  const renamed = await api(`/api/items/${id}`, "PATCH", { action: "rename", title: "  购买马苏里拉奶酪  " });
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.body.item.title, "购买马苏里拉奶酪");
+  assert.equal(renamed.body.item.categoryManual, false);
+  const after = itemRow(id);
+  for (const key of Object.keys(before).filter((key) => !["title", "updated_at"].includes(key))) assert.deepEqual(after[key], before[key], key);
+  assert.deepEqual(db.prepare("SELECT * FROM triggers WHERE item_id = ?").all(id), triggers);
+  assert.deepEqual(db.prepare("SELECT * FROM captures WHERE id = ?").get(before.capture_id), source);
+  assert.equal(db.prepare("SELECT original_value FROM feedback WHERE item_id = ? AND kind = 'rename'").get(id).original_value, before.title);
+});
+
+test("completed titles can be edited without reopening tasks or changing notebook copies", async () => {
+  const before = itemRow(taskA.id);
+  assert.equal(before.status, "completed");
+  const notebook = (await api("/api/dashboard")).body.notebook;
+  const triggers = db.prepare("SELECT * FROM triggers WHERE item_id = ?").all(taskA.id);
+  const renamed = await api(`/api/items/${taskA.id}`, "PATCH", { action: "rename", title: "已评审的设计方案" });
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.body.item.status, "completed");
+  assert.equal(renamed.body.item.completedAt, before.completed_at);
+  assert.equal(renamed.body.item.scheduledFor, before.scheduled_for);
+  assert.deepEqual(db.prepare("SELECT * FROM triggers WHERE item_id = ?").all(taskA.id), triggers);
+  assert.deepEqual((await api("/api/dashboard")).body.notebook, notebook);
+  assert.equal((await api(`/api/topics/${topicB.id}`)).body.items.find((item) => item.id === taskA.id).title, "已评审的设计方案");
+});
+
+test("renaming a waiting item preserves waiting and rejects blank, missing and oversized titles", async () => {
+  const created = await capture("等朋友确认野餐地点", "none", { category: "relationship" });
+  const id = created.body.item.id;
+  await api(`/api/items/${id}`, "PATCH", { action: "waiting" });
+  const triggers = db.prepare("SELECT * FROM triggers WHERE item_id = ?").all(id);
+  for (const title of ["", "   ", "字".repeat(121), null]) {
+    assert.equal((await api(`/api/items/${id}`, "PATCH", { action: "rename", title })).status, 400);
+  }
+  assert.equal((await api(`/api/items/${id}`, "PATCH", { action: "rename" })).status, 400);
+  assert.equal((await api(`/api/items/${randomUUID()}`, "PATCH", { action: "rename", title: "不存在" })).status, 404);
+  const renamed = await api(`/api/items/${id}`, "PATCH", { action: "rename", title: "等待确认野餐公园" });
+  assert.equal(renamed.body.item.status, "waiting");
+  assert.equal(renamed.body.item.scheduledFor, null);
+  assert.deepEqual(db.prepare("SELECT * FROM triggers WHERE item_id = ?").all(id), triggers);
+});
+
+test("category collections span topics, include completed items once, and omit merged or abandoned items", async () => {
+  const first = (await capture("购买展厅灯泡", topicA.id, { category: "shopping" })).body.item;
+  const second = (await capture("购买门店门垫", topicB.id, { category: "shopping" })).body.item;
+  const unassigned = (await capture("购买洗衣液", "none", { category: "shopping" })).body.item;
+  const discarded = (await capture("购买旧型号电池", "none", { category: "shopping" })).body.item;
+  const merged = (await capture("重复的电池记录", "none", { category: "shopping" })).body.item;
+  await api(`/api/items/${second.id}`, "PATCH", { action: "complete" });
+  await api(`/api/items/${discarded.id}`, "PATCH", { action: "abandon" });
+  db.prepare("UPDATE items SET status = 'merged', merged_into_id = ? WHERE id = ?").run(first.id, merged.id);
+  const response = await api("/api/categories/shopping");
+  assert.equal(response.status, 200);
+  const { category, items } = response.body;
+  assert.equal(category.name, "购物");
+  for (const item of [first, second, unassigned]) assert.ok(items.some((row) => row.id === item.id));
+  for (const item of [discarded, merged]) {
+    assert.ok(!items.some((row) => row.id === item.id));
+    assert.equal((await api(`/api/items/${item.id}`, "PATCH", { action: "rename", title: "不应该修改" })).status, 409);
+  }
+  assert.equal(items.length, new Set(items.map((item) => item.id)).size);
+  assert.equal(category.openCount, items.filter((item) => item.status !== "completed").length);
+  assert.equal(category.completedCount, items.filter((item) => item.status === "completed").length);
+  assert.equal((await api("/api/categories/not-a-category")).status, 404);
+  assert.deepEqual((await api("/api/categories/personal")).body.items, []);
+  const dashboard = (await api("/api/dashboard")).body;
+  assert.equal(dashboard.categories.length, 6);
+  assert.deepEqual(dashboard.categories.find((entry) => entry.id === "shopping"), category);
+});
+
+test("manual category moves keep sources, suggestions, notebook, topic and reminders intact", async () => {
+  const before = itemRow(taskA.id);
+  const triggers = db.prepare("SELECT * FROM triggers WHERE item_id = ?").all(taskA.id);
+  const notebook = (await api("/api/dashboard")).body.notebook;
+  const sources = db.prepare("SELECT * FROM item_sources WHERE item_id = ?").all(taskA.id);
+  const enrichment = db.prepare("SELECT * FROM item_enrichments WHERE item_id = ?").all(taskA.id);
+  assert.equal((await api(`/api/items/${taskA.id}`, "PATCH", { action: "set_category", category: "invalid" })).status, 400);
+  const result = await api(`/api/items/${taskA.id}`, "PATCH", { action: "set_category", category: "work" });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.item.category, "work");
+  assert.equal(result.body.item.categoryManual, true);
+  const after = itemRow(taskA.id);
+  for (const key of Object.keys(before).filter((key) => !["category", "category_manual", "updated_at"].includes(key))) assert.deepEqual(after[key], before[key], key);
+  assert.deepEqual(db.prepare("SELECT * FROM triggers WHERE item_id = ?").all(taskA.id), triggers);
+  assert.deepEqual(db.prepare("SELECT * FROM item_sources WHERE item_id = ?").all(taskA.id), sources);
+  assert.deepEqual(db.prepare("SELECT * FROM item_enrichments WHERE item_id = ?").all(taskA.id), enrichment);
+  assert.deepEqual((await api("/api/dashboard")).body.notebook, notebook);
+  assert.ok((await api("/api/categories/work")).body.items.some((item) => item.id === taskA.id));
+  assert.ok(!(await api(`/api/categories/${before.category}`)).body.items.some((item) => item.id === taskA.id));
+});
+
+test("later AI supplements respect a manually corrected category", async () => {
+  const created = (await capture("星河项目采购展台绿植", topicA.id, { category: "shopping" })).body.item;
+  await api(`/api/items/${created.id}`, "PATCH", { action: "set_category", category: "work" });
+  const supplement = await capture("星河项目采购展台绿植补充：需要两盆", topicA.id, {
+    title: "星河项目采购展台绿植", category: "shopping", operation: "merge", mergeTargetId: created.id, mergeConfidence: 0.99
+  });
+  assert.equal(supplement.body.merged, true);
+  assert.equal(supplement.body.item.id, created.id);
+  assert.equal(supplement.body.item.category, "work");
+  assert.equal(supplement.body.item.categoryManual, true);
+  assert.equal(supplement.body.item.sourceCount, 2);
+  assert.equal(supplement.body.item.topicId, topicA.id);
+  assert.ok(!(await api("/api/categories/shopping")).body.items.some((item) => item.id === created.id));
+  assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+});

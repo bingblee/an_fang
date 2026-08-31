@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb, itemSelect, mapItem } from "@/lib/db";
 import { snoozeDate } from "@/lib/date";
+import { categoryIds } from "@/lib/category-definitions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,9 +15,11 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("later") }),
   z.object({ action: z.literal("snooze"), preset: z.string().min(1) }),
   z.object({ action: z.literal("set_topic"), topicId: z.string().uuid().nullable() }),
+  z.object({ action: z.literal("rename"), title: z.string().trim().min(1).max(120) }),
+  z.object({ action: z.literal("set_category"), category: z.enum(categoryIds) }),
   z.object({
     action: z.literal("edit"),
-    title: z.string().min(1).max(120),
+    title: z.string().trim().min(1).max(120),
     scheduledFor: z.string().nullable().optional(),
     status: z.enum(["scheduled", "waiting", "later"]).optional()
   })
@@ -42,7 +45,17 @@ export async function PATCH(
 
   const now = new Date().toISOString();
   const action = parsed.data;
-  if (action.action === "set_topic") {
+  if ((action.action === "rename" || action.action === "set_category") &&
+      (existing.status === "merged" || existing.status === "abandoned")) {
+    return NextResponse.json({ error: "这件事已合并或不再处理，请刷新列表。" }, { status: 409 });
+  }
+  if (action.action === "rename") {
+    // Renaming must not reschedule, confirm, or reopen the item.
+    db.prepare("UPDATE items SET title = ?, updated_at = ? WHERE id = ?").run(action.title, now, id);
+  } else if (action.action === "set_category") {
+    db.prepare("UPDATE items SET category = ?, category_manual = 1, updated_at = ? WHERE id = ?")
+      .run(action.category, now, id);
+  } else if (action.action === "set_topic") {
     if (action.topicId && !db.prepare("SELECT id FROM topics WHERE id = ?").get(action.topicId)) {
       return NextResponse.json({ error: "话题不存在，请刷新后重试。" }, { status: 404 });
     }
@@ -131,7 +144,8 @@ export async function PATCH(
     randomUUID(),
     id,
     action.action,
-    action.action === "edit" ? String(existing.scheduled_for || "") : action.action === "set_topic" ? String(existing.topic_id || "") : null,
+    action.action === "rename" ? String(existing.title) : action.action === "set_category" ? String(existing.category) :
+      action.action === "edit" ? String(existing.scheduled_for || "") : action.action === "set_topic" ? String(existing.topic_id || "") : null,
     JSON.stringify(action),
     now
   );

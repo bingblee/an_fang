@@ -1,12 +1,13 @@
 import { z } from "zod";
 import type { ExtractedItem, MergeCandidate } from "@/lib/types";
 import type { TopicContext } from "@/lib/topics";
+import { categoryIds } from "@/lib/category-definitions";
 
 const extractionSchema = z.object({
   title: z.string().min(1).max(120),
   notes: z.string().nullable().default(null),
   category: z
-    .enum(["work", "life", "shopping", "relationship", "personal", "other"])
+    .enum(categoryIds)
     .default("other"),
   priority: z.enum(["urgent", "high", "normal", "low"]).default("normal"),
   durationMinutes: z.number().int().min(1).max(1440).nullable().default(null),

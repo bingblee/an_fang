@@ -279,7 +279,8 @@ export async function POST(request: NextRequest) {
 
       db.prepare(
         `UPDATE items SET
-          title = ?, notes = ?, category = ?, status = ?, priority = ?,
+          title = ?, notes = ?, category = CASE WHEN category_manual = 1 THEN category ELSE ? END,
+          status = ?, priority = ?,
           duration_minutes = ?, energy = ?, person = ?, context_label = ?,
           scheduled_for = ?, time_window = ?, source_excerpt = ?,
           extraction_source = ?, confidence = ?, needs_confirmation = ?,

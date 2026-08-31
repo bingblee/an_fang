@@ -1,3 +1,5 @@
+import type { CategoryId } from "@/lib/category-definitions";
+
 export type ItemStatus =
   | "scheduled"
   | "waiting"
@@ -6,13 +8,20 @@ export type ItemStatus =
   | "merged"
   | "abandoned";
 
-export type ItemCategory =
-  | "work"
-  | "life"
-  | "shopping"
-  | "relationship"
-  | "personal"
-  | "other";
+export type ItemCategory = CategoryId;
+
+export interface CategorySummary {
+  id: ItemCategory;
+  name: string;
+  description: string;
+  openCount: number;
+  completedCount: number;
+}
+
+export interface CategoryDetail {
+  category: CategorySummary;
+  items: Item[];
+}
 
 export type Priority = "urgent" | "high" | "normal" | "low";
 export type Energy = "low" | "medium" | "high";
@@ -63,6 +72,7 @@ export interface Item {
   title: string;
   notes: string | null;
   category: ItemCategory;
+  categoryManual: boolean;
   status: ItemStatus;
   priority: Priority;
   durationMinutes: number | null;
@@ -107,6 +117,7 @@ export interface MergeCandidate {
 
 export interface DashboardData {
   topics: Topic[];
+  categories: CategorySummary[];
   today: Item[];
   quick: Item[];
   later: Item[];
