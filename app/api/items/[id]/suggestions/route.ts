@@ -25,7 +25,7 @@ export async function POST(
   const item = db
     .prepare(
       `SELECT id, title FROM items
-       WHERE id = ? AND status IN ('scheduled', 'waiting', 'later')`
+       WHERE id = ? AND status IN ('scheduled', 'doing', 'waiting', 'later')`
     )
     .get(id) as { id: string; title: string } | undefined;
   if (!item) {

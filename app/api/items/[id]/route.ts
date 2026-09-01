@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb, itemSelect, mapItem } from "@/lib/db";
 import { snoozeDate } from "@/lib/date";
 import { categoryIds } from "@/lib/category-definitions";
+import { initialReviewPlan, nextReviewPlan } from "@/lib/review-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,8 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("abandon") }),
   z.object({ action: z.literal("waiting") }),
   z.object({ action: z.literal("later") }),
+  z.object({ action: z.literal("start") }),
+  z.object({ action: z.literal("keep_later") }),
   z.object({ action: z.literal("snooze"), preset: z.string().min(1) }),
   z.object({ action: z.literal("set_topic"), topicId: z.string().uuid().nullable() }),
   z.object({ action: z.literal("rename"), title: z.string().trim().min(1).max(120) }),
@@ -45,8 +48,8 @@ export async function PATCH(
 
   const now = new Date().toISOString();
   const action = parsed.data;
-  if ((action.action === "rename" || action.action === "set_category") &&
-      (existing.status === "merged" || existing.status === "abandoned")) {
+  let actionMessage: string | undefined;
+  if (existing.status === "merged" || existing.status === "abandoned") {
     return NextResponse.json({ error: "这件事已合并或不再处理，请刷新列表。" }, { status: 409 });
   }
   if (action.action === "rename") {
@@ -63,34 +66,66 @@ export async function PATCH(
       .run(action.topicId, now, id);
   } else if (action.action === "complete") {
     db.prepare(
-      "UPDATE items SET status = 'completed', completed_at = ?, updated_at = ? WHERE id = ?"
+      `UPDATE items SET status = 'completed', review_at = NULL,
+       review_interval_days = NULL, completed_at = ?, updated_at = ? WHERE id = ?`
     ).run(now, now, id);
     db.prepare("UPDATE triggers SET active = 0 WHERE item_id = ?").run(id);
   } else if (action.action === "abandon") {
     db.prepare(
-      "UPDATE items SET status = 'abandoned', updated_at = ? WHERE id = ?"
+      `UPDATE items SET status = 'abandoned', review_at = NULL,
+       review_interval_days = NULL, updated_at = ? WHERE id = ?`
     ).run(now, id);
     db.prepare("UPDATE triggers SET active = 0 WHERE item_id = ?").run(id);
   } else if (action.action === "waiting") {
     db.prepare(
-      "UPDATE items SET status = 'waiting', scheduled_for = NULL, updated_at = ? WHERE id = ?"
+      `UPDATE items SET status = 'waiting', scheduled_for = NULL, review_at = NULL,
+       review_interval_days = NULL, completed_at = NULL, updated_at = ? WHERE id = ?`
     ).run(now, id);
     db.prepare("UPDATE triggers SET active = 0 WHERE item_id = ?").run(id);
+  } else if (action.action === "start") {
+    db.prepare(`UPDATE items SET status = 'doing', scheduled_for = NULL, review_at = NULL,
+      review_interval_days = NULL, completed_at = NULL, needs_confirmation = 0,
+      confirmation_question = NULL, updated_at = ? WHERE id = ?`).run(now, id);
+    db.prepare("UPDATE triggers SET active = 0 WHERE item_id = ?").run(id);
+    actionMessage = "已移到今日的“正在做”。";
   } else if (action.action === "later") {
+    // An explicit “put it back” must always move the item into the future,
+    // including urgent items that originally resurfaced immediately.
+    const plan = nextReviewPlan(
+      typeof existing.review_interval_days === "number" ? existing.review_interval_days : null,
+      new Date(now)
+    );
     db.prepare(
-      "UPDATE items SET status = 'later', scheduled_for = NULL, updated_at = ? WHERE id = ?"
-    ).run(now, id);
+      `UPDATE items SET status = 'later', scheduled_for = NULL, review_at = ?,
+       review_interval_days = ?, completed_at = NULL, updated_at = ? WHERE id = ?`
+    ).run(plan.reviewAt, plan.intervalDays, now, id);
     db.prepare("UPDATE triggers SET active = 0 WHERE item_id = ?").run(id);
     db.prepare(
       `INSERT INTO triggers (id, item_id, type, value, active, created_at)
-       VALUES (?, ?, 'review', 'daily', 1, ?)`
-    ).run(randomUUID(), id, now);
+       VALUES (?, ?, 'review', ?, 1, ?)`
+    ).run(randomUUID(), id, plan.reviewAt, now);
+    actionMessage = "已放回稍后，系统会在合适的时候再拿回来。";
+  } else if (action.action === "keep_later") {
+    const futureSchedule = existing.status === "scheduled" && existing.scheduled_for &&
+      new Date(String(existing.scheduled_for)) > new Date(now);
+    if (futureSchedule) {
+      db.prepare("UPDATE items SET updated_at = ? WHERE id = ?").run(now, id);
+      actionMessage = "会按原定时间回来。";
+    } else {
+      const plan = nextReviewPlan(typeof existing.review_interval_days === "number" ? existing.review_interval_days : null, new Date(now));
+      db.prepare(`UPDATE items SET status = 'later', scheduled_for = NULL, review_at = ?,
+        review_interval_days = ?, completed_at = NULL, updated_at = ? WHERE id = ?`).run(plan.reviewAt, plan.intervalDays, now, id);
+      db.prepare("UPDATE triggers SET active = 0 WHERE item_id = ?").run(id);
+      db.prepare(`INSERT INTO triggers (id, item_id, type, value, active, created_at)
+        VALUES (?, ?, 'review', ?, 1, ?)`).run(randomUUID(), id, plan.reviewAt, now);
+      actionMessage = `先继续放着，${plan.intervalDays} 天后再拿回来。`;
+    }
   } else if (action.action === "snooze") {
     const scheduledFor = snoozeDate(action.preset);
     db.prepare(
       `UPDATE items
-       SET status = 'scheduled', scheduled_for = ?, needs_confirmation = 0,
-           confirmation_question = NULL, updated_at = ?
+       SET status = 'scheduled', scheduled_for = ?, review_at = NULL, needs_confirmation = 0,
+           review_interval_days = NULL, completed_at = NULL, confirmation_question = NULL, updated_at = ?
        WHERE id = ?`
     ).run(scheduledFor, now, id);
     db.prepare("UPDATE triggers SET active = 0 WHERE item_id = ?").run(id);
@@ -112,16 +147,19 @@ export async function PATCH(
       : action.status === "waiting"
         ? "waiting"
         : "later";
+    const reviewPlan = status === "later"
+      ? initialReviewPlan(String(existing.priority) as "urgent" | "high" | "normal" | "low", new Date(now))
+      : null;
     db.prepare(
       `UPDATE items
-       SET title = ?, scheduled_for = ?, status = ?, time_window = NULL,
+       SET title = ?, scheduled_for = ?, status = ?, review_at = ?, review_interval_days = ?, time_window = NULL,
            context_label = CASE
              WHEN context_label IN ('上午', '下午', '晚上', '今晚', '明早') THEN NULL
              ELSE context_label
            END,
-           needs_confirmation = 0, confirmation_question = NULL, updated_at = ?
+           completed_at = NULL, needs_confirmation = 0, confirmation_question = NULL, updated_at = ?
        WHERE id = ?`
-    ).run(action.title, scheduledFor, status, now, id);
+    ).run(action.title, scheduledFor, status, reviewPlan?.reviewAt || null, reviewPlan?.intervalDays || null, now, id);
     db.prepare("UPDATE triggers SET active = 0 WHERE item_id = ?").run(id);
     if (scheduledFor) {
       db.prepare(
@@ -131,8 +169,8 @@ export async function PATCH(
     } else {
       db.prepare(
         `INSERT INTO triggers (id, item_id, type, value, active, created_at)
-         VALUES (?, ?, 'review', 'daily', 1, ?)`
-      ).run(randomUUID(), id, now);
+         VALUES (?, ?, 'review', ?, 1, ?)`
+      ).run(randomUUID(), id, reviewPlan!.reviewAt, now);
     }
   }
 
@@ -154,5 +192,5 @@ export async function PATCH(
     string,
     string | number | null
   >;
-  return NextResponse.json({ item: mapItem(row) });
+  return NextResponse.json({ item: mapItem(row), message: actionMessage });
 }

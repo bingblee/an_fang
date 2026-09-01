@@ -113,7 +113,7 @@ export function findMergeCandidates(db: DatabaseSync, input: string, hasImage = 
       `SELECT id, topic_id, title, notes, category, status, scheduled_for, time_window,
               person, context_label, source_excerpt, updated_at
        FROM items
-       WHERE status IN ('scheduled', 'waiting', 'later')
+       WHERE status IN ('scheduled', 'doing', 'waiting', 'later')
          AND updated_at >= ?
          AND (? = 'auto' OR (? = 'none' AND topic_id IS NULL) OR topic_id = ? OR (? NOT IN ('auto', 'none') AND topic_id IS NULL))
        ORDER BY updated_at DESC

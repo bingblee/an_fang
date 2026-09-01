@@ -4,7 +4,7 @@ import type { CategorySummary } from "@/lib/types";
 
 export function listCategories(db: DatabaseSync): CategorySummary[] {
   const rows = db.prepare(`SELECT category,
-    COUNT(CASE WHEN status IN ('scheduled', 'waiting', 'later') THEN 1 END) AS open_count,
+    COUNT(CASE WHEN status IN ('scheduled', 'doing', 'waiting', 'later') THEN 1 END) AS open_count,
     COUNT(CASE WHEN status = 'completed' THEN 1 END) AS completed_count
     FROM items GROUP BY category`).all();
   return categoryIds.map((id) => {

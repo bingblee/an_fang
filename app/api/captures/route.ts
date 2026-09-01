@@ -10,6 +10,7 @@ import { findMergeCandidates } from "@/lib/merge-candidates";
 import { canMergeIntoTopic, createTopic, listTopics, parseTopicCommand, resolveTopicAssignment, topicContext } from "@/lib/topics";
 import type { Topic, TopicSource } from "@/lib/types";
 import { z } from "zod";
+import { initialReviewPlan } from "@/lib/review-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,7 +50,8 @@ function addTrigger(
   itemId: string,
   schedule: { status: "scheduled" | "waiting" | "later"; scheduledFor: string | null },
   contextLabel: string | null,
-  createdAt: string
+  createdAt: string,
+  reviewAt: string | null = null
 ) {
   if (schedule.scheduledFor) {
     db.prepare(
@@ -64,8 +66,8 @@ function addTrigger(
   } else {
     db.prepare(
       `INSERT INTO triggers (id, item_id, type, value, active, created_at)
-       VALUES (?, ?, 'review', 'daily', 1, ?)`
-    ).run(randomUUID(), itemId, createdAt);
+       VALUES (?, ?, 'review', ?, 1, ?)`
+    ).run(randomUUID(), itemId, reviewAt || "daily", createdAt);
   }
 }
 
@@ -185,6 +187,9 @@ export async function POST(request: NextRequest) {
     let assignment = resolveTopicAssignment(assignmentInput);
     const extracted = extraction.item;
     const schedule = resolveSchedule(extracted);
+    const initialReview = schedule.status === "later"
+      ? initialReviewPlan(extracted.priority, new Date(createdAt))
+      : null;
     const itemId = randomUUID();
     const extractionId = randomUUID();
 
@@ -226,7 +231,7 @@ export async function POST(request: NextRequest) {
         ? (db
             .prepare(
               `SELECT * FROM items
-               WHERE id = ? AND status IN ('scheduled', 'waiting', 'later')`
+               WHERE id = ? AND status IN ('scheduled', 'doing', 'waiting', 'later')`
             )
             .get(extraction.mergeTargetId) as Record<string, string | number | null> | undefined)
         : undefined;
@@ -270,6 +275,10 @@ export async function POST(request: NextRequest) {
       const nextScheduledFor = hasScheduleUpdate
         ? schedule.scheduledFor
         : existingTarget.scheduled_for;
+      const nextReviewAt = hasScheduleUpdate ? initialReview?.reviewAt || null : existingTarget.review_at;
+      const nextReviewInterval = hasScheduleUpdate
+        ? initialReview?.intervalDays || null
+        : existingTarget.review_interval_days;
       const nextNotes = combineText(existingTarget.notes, extracted.notes, processingText);
       const nextSourceExcerpt = combineText(
         existingTarget.source_excerpt,
@@ -282,7 +291,7 @@ export async function POST(request: NextRequest) {
           title = ?, notes = ?, category = CASE WHEN category_manual = 1 THEN category ELSE ? END,
           status = ?, priority = ?,
           duration_minutes = ?, energy = ?, person = ?, context_label = ?,
-          scheduled_for = ?, time_window = ?, source_excerpt = ?,
+          scheduled_for = ?, review_at = ?, review_interval_days = ?, time_window = ?, source_excerpt = ?,
           extraction_source = ?, confidence = ?, needs_confirmation = ?,
           confirmation_question = ?, updated_at = ?
          WHERE id = ?`
@@ -297,6 +306,8 @@ export async function POST(request: NextRequest) {
         extracted.person ?? existingTarget.person,
         extracted.contextLabel ?? existingTarget.context_label,
         nextScheduledFor,
+        nextReviewAt,
+        nextReviewInterval,
         extracted.timeWindow ?? existingTarget.time_window,
         nextSourceExcerpt,
         extraction.provider,
@@ -322,7 +333,8 @@ export async function POST(request: NextRequest) {
             scheduledFor: nextScheduledFor as string | null
           },
           extracted.contextLabel ?? (existingTarget.context_label as string | null),
-          createdAt
+          createdAt,
+          nextReviewAt as string | null
         );
       }
     } else {
@@ -330,9 +342,10 @@ export async function POST(request: NextRequest) {
         `INSERT INTO items
           (id, capture_id, title, notes, category, status, priority,
            duration_minutes, energy, person, context_label, scheduled_for,
+           review_at, review_interval_days,
            time_window, source_excerpt, extraction_source, confidence,
            needs_confirmation, confirmation_question, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         itemId,
         captureId,
@@ -346,6 +359,8 @@ export async function POST(request: NextRequest) {
         extracted.person,
         extracted.contextLabel,
         schedule.scheduledFor,
+        initialReview?.reviewAt || null,
+        initialReview?.intervalDays || null,
         extracted.timeWindow,
         sourceText || null,
         extraction.provider,
@@ -359,7 +374,7 @@ export async function POST(request: NextRequest) {
         `INSERT INTO item_sources (item_id, capture_id, relation, created_at)
          VALUES (?, ?, 'primary', ?)`
       ).run(itemId, captureId, createdAt);
-      addTrigger(db, itemId, schedule, extracted.contextLabel, createdAt);
+      addTrigger(db, itemId, schedule, extracted.contextLabel, createdAt, initialReview?.reviewAt || null);
     }
     db.prepare("UPDATE items SET topic_id = ?, topic_source = ? WHERE id = ?")
       .run(assignment.topicId, assignment.source, resultItemId);

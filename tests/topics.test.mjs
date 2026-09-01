@@ -112,15 +112,18 @@ after(async () => {
   if (dataDir && process.env.KEEP_TEST_DATA) console.log(`Disposable test data: ${dataDir}`);
 });
 
-test("legacy database migrates without altering existing tasks", async () => {
+test("legacy database adds a review cycle without altering existing task content", async () => {
   const result = await api("/api/dashboard");
   assert.equal(result.status, 200);
   assert.deepEqual(result.body.topics, []);
   assert.equal(result.body.totalOpen, 1);
   assert.equal(result.body.environment, "test");
   assert.equal(result.body.remindersEnabled, false);
-  assert.equal(result.body.later[0].id, legacyId);
-  assert.equal(result.body.later[0].topicId, null);
+  const legacyItem = [...result.body.review, ...result.body.later].find((item) => item.id === legacyId);
+  assert.equal(legacyItem.id, legacyId);
+  assert.equal(legacyItem.topicId, null);
+  assert.equal(legacyItem.status, "later");
+  assert.ok(legacyItem.reviewAt);
   assert.equal(itemRow(legacyId).title, "原有事项，不要丢失");
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
 });
@@ -450,4 +453,153 @@ test("later AI supplements respect a manually corrected category", async () => {
   assert.equal(supplement.body.item.topicId, topicA.id);
   assert.ok(!(await api("/api/categories/shopping")).body.items.some((item) => item.id === created.id));
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+});
+
+test("unscheduled work gets a review time and can move into today's active work", async () => {
+  const created = await capture("整理九月旅行证件清单", "none", {
+    title: "整理九月旅行证件清单",
+    category: "personal",
+    priority: "urgent",
+    scheduleHint: "none"
+  });
+  assert.equal(created.status, 200);
+  assert.equal(created.body.item.status, "later");
+  assert.equal(created.body.item.reviewIntervalDays, 1);
+  assert.ok(created.body.item.reviewAt);
+
+  const due = (await api("/api/dashboard")).body;
+  assert.ok(due.review.some((item) => item.id === created.body.item.id));
+  assert.ok(!due.later.some((item) => item.id === created.body.item.id));
+
+  const started = await api(`/api/items/${created.body.item.id}`, "PATCH", { action: "start" });
+  assert.equal(started.status, 200);
+  assert.equal(started.body.item.status, "doing");
+  assert.equal(started.body.item.reviewAt, null);
+  assert.equal(started.body.item.scheduledFor, null);
+  assert.match(started.body.message, /正在做/);
+  const active = (await api("/api/dashboard")).body;
+  assert.ok(active.doing.some((item) => item.id === created.body.item.id));
+  assert.ok(!active.review.some((item) => item.id === created.body.item.id));
+  assert.ok(!active.later.some((item) => item.id === created.body.item.id));
+});
+
+test("continue leaving an item increases the review interval without bouncing back immediately", async () => {
+  const created = (await capture("整理露营装备保养清单", "none", {
+    title: "整理露营装备保养清单",
+    category: "life",
+    priority: "normal",
+    scheduleHint: "none"
+  })).body.item;
+  db.prepare("UPDATE items SET review_at = ?, review_interval_days = 1 WHERE id = ?")
+    .run("2000-01-01T00:00:00.000Z", created.id);
+
+  const first = await api(`/api/items/${created.id}`, "PATCH", { action: "keep_later" });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.item.status, "later");
+  assert.equal(first.body.item.reviewIntervalDays, 3);
+  assert.ok(new Date(first.body.item.reviewAt).getTime() - Date.now() > 2.9 * 86_400_000);
+  assert.match(first.body.message, /3 天后/);
+  let triggers = db.prepare("SELECT * FROM triggers WHERE item_id = ? AND active = 1").all(created.id);
+  assert.equal(triggers.length, 1);
+  assert.equal(triggers[0].type, "review");
+  assert.equal(triggers[0].value, first.body.item.reviewAt);
+  assert.ok(!(await api("/api/dashboard")).body.review.some((item) => item.id === created.id));
+
+  const second = await api(`/api/items/${created.id}`, "PATCH", { action: "keep_later" });
+  assert.equal(second.body.item.reviewIntervalDays, 7);
+  assert.ok(new Date(second.body.item.reviewAt).getTime() - Date.now() > 6.9 * 86_400_000);
+  triggers = db.prepare("SELECT * FROM triggers WHERE item_id = ? AND active = 1").all(created.id);
+  assert.equal(triggers.length, 1);
+  assert.equal(triggers[0].value, second.body.item.reviewAt);
+});
+
+test("arranging an exact time replaces review, and clearing it restores a review plan", async () => {
+  const created = (await capture("安排年度牙齿复诊", "none", {
+    title: "安排年度牙齿复诊",
+    category: "personal",
+    priority: "normal",
+    scheduleHint: "none"
+  })).body.item;
+  const scheduledFor = "2032-03-12T02:26:00.000Z";
+  const arranged = await api(`/api/items/${created.id}`, "PATCH", {
+    action: "edit",
+    title: created.title,
+    scheduledFor,
+    status: "scheduled"
+  });
+  assert.equal(arranged.status, 200);
+  assert.equal(arranged.body.item.status, "scheduled");
+  assert.equal(arranged.body.item.scheduledFor, scheduledFor);
+  assert.equal(arranged.body.item.reviewAt, null);
+  let active = db.prepare("SELECT * FROM triggers WHERE item_id = ? AND active = 1").all(created.id);
+  assert.equal(active.length, 1);
+  assert.equal(active[0].type, "time");
+  assert.equal(active[0].value, scheduledFor);
+
+  const cleared = await api(`/api/items/${created.id}`, "PATCH", {
+    action: "edit",
+    title: created.title,
+    scheduledFor: null,
+    status: "later"
+  });
+  assert.equal(cleared.body.item.status, "later");
+  assert.equal(cleared.body.item.scheduledFor, null);
+  assert.equal(cleared.body.item.reviewIntervalDays, 3);
+  assert.ok(new Date(cleared.body.item.reviewAt) > new Date());
+  active = db.prepare("SELECT * FROM triggers WHERE item_id = ? AND active = 1").all(created.id);
+  assert.equal(active.length, 1);
+  assert.equal(active[0].type, "review");
+  assert.equal(active[0].value, cleared.body.item.reviewAt);
+});
+
+test("continue leaving an explicitly scheduled item preserves its exact time", async () => {
+  const created = (await capture("2031 年检查长期证件有效期", "none", {
+    title: "检查长期证件有效期",
+    category: "personal",
+    specificTime: "2031-09-18T14:37:00+08:00"
+  })).body.item;
+  const before = itemRow(created.id);
+  const triggers = db.prepare("SELECT * FROM triggers WHERE item_id = ? AND active = 1").all(created.id);
+  const kept = await api(`/api/items/${created.id}`, "PATCH", { action: "keep_later" });
+  assert.equal(kept.status, 200);
+  assert.equal(kept.body.item.status, "scheduled");
+  assert.equal(kept.body.item.scheduledFor, before.scheduled_for);
+  assert.equal(kept.body.item.reviewAt, null);
+  assert.match(kept.body.message, /原定时间/);
+  assert.deepEqual(db.prepare("SELECT * FROM triggers WHERE item_id = ? AND active = 1").all(created.id), triggers);
+  assert.ok((await api("/api/dashboard")).body.later.some((item) => item.id === created.id));
+});
+
+test("today resurfaces at most three due items and every decision removes one from review", async () => {
+  const ids = [];
+  for (let index = 0; index < 4; index += 1) {
+    const item = (await capture(`复盘测试事项 ${index + 1}`, "none", {
+      title: `复盘测试事项 ${index + 1}`,
+      category: "other",
+      priority: "urgent",
+      scheduleHint: "none"
+    })).body.item;
+    db.prepare("UPDATE items SET review_at = ? WHERE id = ?")
+      .run(`2000-01-0${index + 1}T00:00:00.000Z`, item.id);
+    ids.push(item.id);
+  }
+
+  const before = (await api("/api/dashboard")).body;
+  assert.equal(before.review.length, 3);
+  assert.deepEqual(before.review.map((item) => item.id), ids.slice(0, 3));
+  assert.ok(before.later.some((item) => item.id === ids[3]));
+
+  const waiting = await api(`/api/items/${ids[0]}`, "PATCH", { action: "waiting" });
+  assert.equal(waiting.body.item.status, "waiting");
+  assert.equal(waiting.body.item.reviewAt, null);
+  const abandoned = await api(`/api/items/${ids[1]}`, "PATCH", { action: "abandon" });
+  assert.equal(abandoned.body.item.status, "abandoned");
+  const postponed = await api(`/api/items/${ids[2]}`, "PATCH", { action: "later" });
+  assert.equal(postponed.body.item.status, "later");
+  assert.ok(new Date(postponed.body.item.reviewAt) > new Date());
+
+  const after = (await api("/api/dashboard")).body;
+  assert.ok(after.waiting.some((item) => item.id === ids[0]));
+  assert.ok(!after.review.some((item) => ids.slice(0, 3).includes(item.id)));
+  assert.ok(after.review.some((item) => item.id === ids[3]));
 });

@@ -19,7 +19,7 @@ export function topicNameKey(name: string) {
 export function listTopics(db: DatabaseSync): Topic[] {
   const rows = db.prepare(`
     SELECT t.*,
-      COUNT(CASE WHEN i.status IN ('scheduled', 'waiting', 'later') THEN 1 END) AS open_count,
+      COUNT(CASE WHEN i.status IN ('scheduled', 'doing', 'waiting', 'later') THEN 1 END) AS open_count,
       COUNT(CASE WHEN i.status = 'completed' THEN 1 END) AS completed_count
     FROM topics t LEFT JOIN items i ON i.topic_id = t.id
     GROUP BY t.id ORDER BY t.created_at DESC, t.id

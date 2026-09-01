@@ -3,6 +3,7 @@
 import {
   Bell,
   BookOpen,
+  CalendarPlus,
   Check,
   ChevronDown,
   Clock3,
@@ -14,6 +15,8 @@ import {
   MoreHorizontal,
   Paperclip,
   Pencil,
+  Play,
+  RotateCcw,
   Sparkles,
   SunMedium,
   Upload,
@@ -44,6 +47,8 @@ type Toast = { message: string; tone: "success" | "error" | "neutral" } | null;
 const emptyDashboard: DashboardData = {
   today: [],
   quick: [],
+  doing: [],
+  review: [],
   later: [],
   waiting: [],
   inbox: [],
@@ -101,6 +106,27 @@ function formatSchedule(value: string | null, windowLabel: string | null) {
     minute: "2-digit",
     hour12: false
   }).format(date);
+}
+
+const statusLabels: Record<Item["status"], string> = {
+  scheduled: "新任务",
+  doing: "进行中",
+  waiting: "等待中",
+  later: "新任务",
+  completed: "已完成",
+  merged: "已合并",
+  abandoned: "不再处理"
+};
+
+function formatReview(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  if (date <= today) return "现在重新想起";
+  if (date.toDateString() === tomorrow.toDateString()) return "明天再看看";
+  return `${new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(date)} 再看看`;
 }
 
 function CaptureComposer({
@@ -301,13 +327,15 @@ function ItemCard({
   onChange,
   topics,
   onOpenTopic,
-  onOpenCategory
+  onOpenCategory,
+  planningActions = false
 }: {
   item: Item;
   onChange: (message?: string) => void;
   topics: Topic[];
   onOpenTopic: (id: string) => void;
   onOpenCategory: (id: ItemCategory) => void;
+  planningActions?: boolean;
 }) {
   const completed = item.status === "completed";
   const [busy, setBusy] = useState(false);
@@ -328,9 +356,9 @@ function ItemCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
-      const result = (await response.json()) as { error?: string };
+      const result = (await response.json()) as { error?: string; message?: string };
       if (!response.ok) throw new Error(result.error || "操作没有成功");
-      onChange(message);
+      onChange(result.message || message);
       return true;
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : "操作没有成功");
@@ -427,6 +455,9 @@ function ItemCard({
     item.sourceCount > 1 ? `${item.sourceCount} 条关联信息` : null,
     item.enrichmentCount ? `${item.enrichmentCount} 条 AI 建议` : null
   ].filter(Boolean);
+  const scheduleText = item.status === "doing" && !item.scheduledFor
+    ? "今天"
+    : formatSchedule(item.scheduledFor, item.timeWindow);
 
   if (editingTitle) {
     return <article className="item-card title-edit-card">
@@ -527,15 +558,16 @@ function ItemCard({
           ) : null}
         </div>
         <div className="item-meta">
+          <span className={`status-badge status-${item.status}`}>{statusLabels[item.status]}</span>
           <button
             className="schedule-meta schedule-edit-button"
             onClick={beginEditing}
-            aria-label={`修改时间：${formatSchedule(item.scheduledFor, item.timeWindow)}`}
+            aria-label={`修改时间：${scheduleText}`}
             title="修改时间"
             disabled={busy || completed}
           >
             <Clock3 size={13} />
-            {formatSchedule(item.scheduledFor, item.timeWindow)}
+            {scheduleText}
             <Pencil size={10} />
           </button>
           <button className="category-badge" onClick={() => onOpenCategory(item.category)}
@@ -557,6 +589,9 @@ function ItemCard({
               <Sparkles size={11} /> AI 整理
             </span>
           )}
+          {!item.scheduledFor && item.reviewAt && (
+            <span className="review-meta"><RotateCcw size={11} /> {formatReview(item.reviewAt)}</span>
+          )}
         </div>
 
         {!expanded && item.enrichment && (
@@ -566,6 +601,26 @@ function ItemCard({
             </span>
             <span>{item.enrichment.summary}</span>
           </button>
+        )}
+
+        {planningActions && !completed && (
+          <div className="planning-actions" aria-label={`决定下一步：${item.title}`}>
+            <span className="planning-label">下一步</span>
+            <button className="planning-primary" disabled={busy || item.status === "doing"}
+              onClick={() => void action({ action: "start" })}>
+              <Play size={12} /> 今天做
+            </button>
+            <button disabled={busy} onClick={beginEditing}>
+              <CalendarPlus size={12} /> 安排时间
+            </button>
+            <button disabled={busy} onClick={() => void action({ action: "keep_later" })}>
+              <RotateCcw size={12} /> 继续放着
+            </button>
+            <button disabled={busy || item.status === "waiting"}
+              onClick={() => void action({ action: "waiting" }, "已标记为等待中。")}>等待中</button>
+            <button className="planning-abandon" disabled={busy}
+              onClick={() => void action({ action: "abandon" }, "这件事不会再提醒你。")}>不再处理</button>
+          </div>
         )}
 
         {expanded && (
@@ -632,23 +687,17 @@ function ItemCard({
                 <Sparkles size={12} />
                 {item.enrichment ? "再给一条建议" : "给我建议"}
               </button>
-              <span>稍后提醒</span>
-              <button onClick={() => void action({ action: "snooze", preset: "hour" })}>
-                一小时后
-              </button>
-              <button onClick={() => void action({ action: "snooze", preset: "tonight" })}>
-                今晚
-              </button>
-              <button onClick={() => void action({ action: "snooze", preset: "tomorrow" })}>
-                明天
-              </button>
-              <button onClick={() => void action({ action: "snooze", preset: "weekend" })}>
-                周末
-              </button>
-              <button onClick={() => void action({ action: "waiting" })}>等待中</button>
-              <button className="danger-text" onClick={() => void action({ action: "abandon" })}>
-                不再处理
-              </button>
+              {!planningActions && <>
+                <span>状态</span>
+                <button disabled={item.status === "doing"} onClick={() => void action({ action: "start" })}>今天做</button>
+                <button onClick={beginEditing}>安排时间</button>
+                <button onClick={() => void action({ action: "later" })}>放回稍后</button>
+                <button disabled={item.status === "waiting"}
+                  onClick={() => void action({ action: "waiting" }, "已标记为等待中。")}>等待中</button>
+                <button className="danger-text" onClick={() => void action({ action: "abandon" }, "这件事不会再提醒你。") }>
+                  不再处理
+                </button>
+              </>}
             </div>}
             {suggestionError && <p className="suggestion-error">{suggestionError}</p>}
             {actionError && <p className="suggestion-error">{actionError}</p>}
@@ -675,7 +724,8 @@ function Section({
   icon,
   topics,
   onOpenTopic,
-  onOpenCategory
+  onOpenCategory,
+  planningActions = false
 }: {
   title: string;
   eyebrow?: string;
@@ -685,6 +735,7 @@ function Section({
   topics: Topic[];
   onOpenTopic: (id: string) => void;
   onOpenCategory: (id: ItemCategory) => void;
+  planningActions?: boolean;
 }) {
   if (!items.length) return null;
   return (
@@ -699,7 +750,8 @@ function Section({
       </div>
       <div className="item-list">
         {items.map((item) => (
-          <ItemCard key={item.id} item={item} onChange={onChange} topics={topics} onOpenTopic={onOpenTopic} onOpenCategory={onOpenCategory} />
+          <ItemCard key={item.id} item={item} onChange={onChange} topics={topics}
+            onOpenTopic={onOpenTopic} onOpenCategory={onOpenCategory} planningActions={planningActions} />
         ))}
       </div>
     </section>
@@ -964,8 +1016,11 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
   };
   const sectionProps = { topics: data.topics, onOpenTopic: openTopic, onOpenCategory: openCategory, onChange: handleChange };
 
-  const todayEmpty = !data.today.length && !data.quick.length && !data.inbox.length;
+  const todayEmpty = !data.today.length && !data.quick.length && !data.doing.length &&
+    !data.review.length && !data.inbox.length;
   const laterCount = data.later.length + data.waiting.length + data.inbox.length;
+  const scheduledLater = data.later.filter((item) => Boolean(item.scheduledFor));
+  const unscheduledLater = data.later.filter((item) => !item.scheduledFor);
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
     return hour < 11 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
@@ -1074,7 +1129,7 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
                 <p className="date-line">{dateHeading()}</p>
                 <h1>{greeting}，今天想安放什么？</h1>
                 <div className="hero-readout" aria-label="今日概览">
-                  <span><strong>{data.today.length + data.quick.length}</strong> 今天</span>
+                  <span><strong>{data.today.length + data.quick.length + data.doing.length + data.review.length}</strong> 在眼前</span>
                   <span><strong>{data.totalOpen}</strong> 替你记着</span>
                 </div>
               </section>
@@ -1098,6 +1153,21 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
                   items={data.inbox}
                   onChange={handleChange}
                   icon={<Inbox size={17} />}
+                />
+                <Section
+                  {...sectionProps}
+                  title="正在做"
+                  eyebrow="今天已经开始的事"
+                  items={data.doing}
+                  icon={<Play size={17} />}
+                />
+                <Section
+                  {...sectionProps}
+                  title="重新想起"
+                  eyebrow="每次最多三件，由你决定下一步"
+                  items={data.review}
+                  icon={<RotateCcw size={17} />}
+                  planningActions
                 />
                 <Section
                   {...sectionProps}
@@ -1130,15 +1200,15 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
             <div className="later-heading">
               <p className="date-line">不必现在处理</p>
               <h1>已经替你收好</h1>
-              <p>事情留在这里，不会因为暂时做不了而消失。</p>
+              <p>有时间的按时回来；没时间的按节奏重新出现。</p>
             </div>
             <Section
               {...sectionProps}
               title="等待中"
-              eyebrow="条件满足后再继续"
+              eyebrow="等别人、等条件，暂时不催你"
               items={data.waiting}
-              onChange={handleChange}
               icon={<Users size={17} />}
+              planningActions
             />
             <Section
               {...sectionProps}
@@ -1149,11 +1219,19 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
             />
             <Section
               {...sectionProps}
-              title="稍后再做"
-              eyebrow="系统会在每日回顾中让它们重新出现"
-              items={data.later}
-              onChange={handleChange}
+              title="已有安排"
+              eyebrow="到了你定的时间，它会回到今日"
+              items={scheduledLater}
+              icon={<CalendarPlus size={17} />}
+              planningActions
+            />
+            <Section
+              {...sectionProps}
+              title="暂未安排"
+              eyebrow="系统会逐步拉长间隔，不让稍后变成仓库"
+              items={unscheduledLater}
               icon={<Clock3 size={17} />}
+              planningActions
             />
             {!laterCount && (
               <div className="empty-state compact">

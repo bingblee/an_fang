@@ -38,6 +38,13 @@ export async function GET() {
 
   const inbox = items.filter((item) => item.needsConfirmation);
   const waiting = items.filter((item) => item.status === "waiting" && !item.needsConfirmation);
+  const doing = items.filter((item) => item.status === "doing" && !item.needsConfirmation);
+  const priorityRank = { urgent: 0, high: 1, normal: 2, low: 3 } as const;
+  const review = items.filter((item) => item.status === "later" && !item.needsConfirmation &&
+    item.reviewAt && new Date(item.reviewAt) <= now)
+    .sort((a, b) => priorityRank[a.priority] - priorityRank[b.priority] ||
+      new Date(a.reviewAt!).getTime() - new Date(b.reviewAt!).getTime())
+    .slice(0, 3);
   const due = items.filter(
     (item) =>
       item.status === "scheduled" &&
@@ -49,7 +56,7 @@ export async function GET() {
     (item) => (item.durationMinutes !== null && item.durationMinutes <= 15) || item.energy === "low"
   );
   const today = due.filter((item) => !quick.some((quickItem) => quickItem.id === item.id));
-  const usedIds = new Set([...inbox, ...waiting, ...quick, ...today].map((item) => item.id));
+  const usedIds = new Set([...inbox, ...waiting, ...doing, ...review, ...quick, ...today].map((item) => item.id));
   const later = items.filter((item) => !usedIds.has(item.id));
 
   const completedRow = db
@@ -64,6 +71,8 @@ export async function GET() {
     categories: listCategories(db),
     today,
     quick,
+    doing,
+    review,
     later,
     waiting,
     inbox,

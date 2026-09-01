@@ -208,8 +208,30 @@ function initialize(db: DatabaseSync) {
   if (!itemColumns.some((column) => column.name === "category_manual")) {
     db.exec("ALTER TABLE items ADD COLUMN category_manual INTEGER NOT NULL DEFAULT 0");
   }
+  if (!itemColumns.some((column) => column.name === "review_at")) {
+    db.exec("ALTER TABLE items ADD COLUMN review_at TEXT");
+  }
+  if (!itemColumns.some((column) => column.name === "review_interval_days")) {
+    db.exec("ALTER TABLE items ADD COLUMN review_interval_days INTEGER");
+  }
+  db.exec(`WITH ranked AS (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY created_at, id) AS position
+      FROM items WHERE status = 'later' AND review_at IS NULL
+    )
+    UPDATE items SET
+      review_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (((SELECT position FROM ranked WHERE ranked.id = items.id) - 1) % 3) || ' days'),
+      review_interval_days = 3
+    WHERE id IN (SELECT id FROM ranked)`);
+  db.exec(`UPDATE triggers
+    SET value = (SELECT review_at FROM items WHERE items.id = triggers.item_id)
+    WHERE type = 'review' AND active = 1 AND (value IS NULL OR value = 'daily')
+      AND EXISTS (
+        SELECT 1 FROM items
+        WHERE items.id = triggers.item_id AND items.status = 'later' AND items.review_at IS NOT NULL
+      )`);
   db.exec("CREATE INDEX IF NOT EXISTS idx_items_topic_status ON items(topic_id, status)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_items_category_status ON items(category, status)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_items_review_at ON items(status, review_at)");
   db.exec(`
     INSERT OR IGNORE INTO item_sources (item_id, capture_id, relation, created_at)
     SELECT id, capture_id, 'primary', created_at FROM items;
@@ -263,6 +285,8 @@ export function mapItem(row: ItemRow): Item {
     person: row.person ? String(row.person) : null,
     contextLabel: row.context_label ? String(row.context_label) : null,
     scheduledFor: row.scheduled_for ? String(row.scheduled_for) : null,
+    reviewAt: row.review_at ? String(row.review_at) : null,
+    reviewIntervalDays: typeof row.review_interval_days === "number" ? row.review_interval_days : null,
     timeWindow: row.time_window ? String(row.time_window) : null,
     sourceExcerpt: row.source_excerpt ? String(row.source_excerpt) : null,
     extractionSource: String(row.extraction_source) as Item["extractionSource"],

@@ -2,6 +2,7 @@ import type { CategoryId } from "@/lib/category-definitions";
 
 export type ItemStatus =
   | "scheduled"
+  | "doing"
   | "waiting"
   | "later"
   | "completed"
@@ -80,6 +81,8 @@ export interface Item {
   person: string | null;
   contextLabel: string | null;
   scheduledFor: string | null;
+  reviewAt: string | null;
+  reviewIntervalDays: number | null;
   timeWindow: string | null;
   sourceExcerpt: string | null;
   extractionSource: "deepseek" | "local";
@@ -120,6 +123,8 @@ export interface DashboardData {
   categories: CategorySummary[];
   today: Item[];
   quick: Item[];
+  doing: Item[];
+  review: Item[];
   later: Item[];
   waiting: Item[];
   inbox: Item[];

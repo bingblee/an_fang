@@ -737,6 +737,36 @@ a:focus-visible {
 .item-meta > span { display: inline-flex; align-items: center; gap: 4px; }
 .schedule-meta { color: var(--cyan); }
 
+.item-meta .status-badge {
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--text-soft);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.item-meta .status-doing {
+  border-color: var(--signal-border);
+  background: var(--signal-wash);
+  color: var(--signal);
+}
+
+.item-meta .status-waiting {
+  border-color: var(--cyan-border);
+  background: var(--cyan-wash);
+  color: var(--cyan);
+}
+
+.item-meta .status-completed {
+  border-color: var(--signal-border);
+  color: var(--signal);
+}
+
+.item-meta .review-meta { color: var(--cyan); }
+
 .schedule-edit-button {
   padding: 0;
   display: inline-flex;
@@ -790,6 +820,69 @@ a:focus-visible {
   line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.planning-actions {
+  margin-top: 14px;
+  padding: 10px 11px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--cyan-border);
+  border-left: 2px solid var(--cyan);
+  border-radius: 3px;
+  background: var(--cyan-wash);
+}
+
+.planning-label {
+  margin-right: 4px;
+  color: var(--cyan);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.planning-actions button {
+  min-height: 29px;
+  padding: 5px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--cyan-border);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--text-soft);
+  font-size: 10px;
+  cursor: pointer;
+  transition: 140ms ease;
+}
+
+.planning-actions button:hover:not(:disabled) {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  transform: translateY(-1px);
+}
+
+.planning-actions button.planning-primary {
+  border-color: var(--signal);
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+
+.planning-actions button.planning-abandon {
+  margin-left: auto;
+  border-color: transparent;
+  background: transparent;
+  color: var(--danger);
+}
+
+.planning-actions button:disabled,
+.item-actions button:disabled {
+  opacity: 0.42;
+  cursor: default;
 }
 
 .more-button {
@@ -1420,6 +1513,10 @@ a:focus-visible {
   .item-card:hover { transform: none; }
   .item-title-row h3 { font-size: 14px; }
   .item-meta { gap: 5px 9px; }
+  .planning-actions { padding: 10px; }
+  .planning-label { width: 100%; margin: 0 0 2px; }
+  .planning-actions button { flex: 1 1 calc(50% - 6px); justify-content: center; min-height: 36px; }
+  .planning-actions button.planning-abandon { margin-left: 0; }
   .suggestion-peek { grid-template-columns: 1fr; gap: 5px; }
   .enrichment-card { padding: 15px; }
   .enrichment-footer, .notebook-meta-row { align-items: flex-start; flex-direction: column; }
