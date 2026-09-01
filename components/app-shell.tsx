@@ -12,6 +12,8 @@ import {
   Inbox,
   Layers3,
   LoaderCircle,
+  Maximize2,
+  Minimize2,
   MoreHorizontal,
   Paperclip,
   Pencil,
@@ -43,6 +45,8 @@ import { CategoryShortcuts, CategoryWorkspace } from "@/components/category-work
 
 type Tab = "today" | "later" | "topics" | "notebook";
 type Toast = { message: string; tone: "success" | "error" | "neutral" } | null;
+type ComposerMode = "full" | "compact" | "docked";
+type TodayGroupId = "important" | "doing" | "quick" | "review" | "inbox";
 
 const emptyDashboard: DashboardData = {
   today: [],
@@ -132,11 +136,17 @@ function formatReview(value: string | null) {
 function CaptureComposer({
   onCaptured,
   topics,
-  initialTopicId = "auto"
+  initialTopicId = "auto",
+  mode = "full",
+  onExpand,
+  onCollapse
 }: {
   onCaptured: (message: string, usedAI: boolean, topicOnly?: boolean) => void;
   topics: Topic[];
   initialTopicId?: string;
+  mode?: ComposerMode;
+  onExpand?: () => void;
+  onCollapse?: () => void;
 }) {
   const [topicChoice, setTopicChoice] = useState(initialTopicId);
   const [justCreated, setJustCreated] = useState<Topic | null>(null);
@@ -223,102 +233,140 @@ function CaptureComposer({
     }
   };
 
+  const expand = () => {
+    onExpand?.();
+    window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
+  };
+
+  const compactText = submitting
+    ? "正在替你整理……"
+    : text.trim()
+      ? `继续记录：${text.trim()}`
+      : file
+        ? "有一张截图还在这里"
+        : "记录一件新事情……";
+
   return (
-    <form
-      className={`capture ${submitting ? "is-processing" : ""}`}
-      onSubmit={onSubmit}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => {
-        event.preventDefault();
-        chooseFile(event.dataTransfer.files[0]);
-      }}
-    >
-      <div className="capture-mark" aria-hidden="true">
-        <Sparkles size={18} strokeWidth={1.8} />
-      </div>
-      <textarea
-        ref={textareaRef}
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={onKeyDown}
-        onPaste={(event) => {
-          const pasted = Array.from(event.clipboardData.items).find((item) =>
-            item.type.startsWith("image/")
-          );
-          const pastedFile = pasted?.getAsFile();
-          if (pastedFile) chooseFile(pastedFile);
-        }}
-        rows={3}
-        autoFocus={initialTopicId === "auto"}
-        placeholder="想到的事，先放在这里……"
-        aria-label="记录一件事"
-        readOnly={submitting}
-      />
-
-      {preview && (
-        <div className="capture-preview">
-          {/* blob URL 只用于本地预览 */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={preview} alt="待上传的截图" />
-          <button type="button" onClick={clearFile} disabled={submitting} aria-label="移除截图">
-            <X size={15} />
-          </button>
-        </div>
-      )}
-
-      <label className="capture-topic">
-        <FolderOpen size={14} aria-hidden="true" />
-        <span>话题</span>
-        <select aria-label="归入话题" value={topicChoice} disabled={submitting}
-          onChange={(event) => setTopicChoice(event.target.value)}>
-          <option value="auto">AI 自动归类</option>
-          <option value="none">未归类</option>
-          {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
-          {justCreated && !topics.some((topic) => topic.id === justCreated.id) &&
-            <option value={justCreated.id}>{justCreated.name}</option>}
-        </select>
-      </label>
-
-      <div className="capture-footer">
-        <div className="capture-tools">
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/gif,image/webp"
-            hidden
-            disabled={submitting}
-            onChange={(event) => chooseFile(event.target.files?.[0])}
-          />
-          <button
-            type="button"
-            className="quiet-button"
-            aria-label="添加截图"
-            disabled={submitting}
-            onClick={() => inputRef.current?.click()}
-          >
-            <ImagePlus size={17} />
-            <span>截图</span>
-          </button>
-          <span className="capture-hint">支持文字、链接和粘贴图片</span>
-        </div>
-        <button
-          className="place-button"
-          type="submit"
-          disabled={submitting || (!text.trim() && !file)}
-        >
-          {submitting ? (
-            <>
-              <LoaderCircle className="spin" size={17} /> 正在整理
-            </>
-          ) : (
-            <>
-              安放 <span className="shortcut">⌘↵</span>
-            </>
-          )}
+    <div className={`capture-dock is-${mode}`}>
+      {mode === "compact" ? (
+        <button type="button" className="compact-capture" onClick={expand}
+          aria-label={`${compactText}，点击展开输入框`}>
+          <span className="compact-capture-mark"><Sparkles size={15} /></span>
+          <span className="compact-capture-copy">
+            <small>{submitting ? "AI 正在整理" : "随手安放"}</small>
+            <strong>{compactText}</strong>
+          </span>
+          <span className="compact-capture-action">点击展开 <Maximize2 size={13} /></span>
         </button>
-      </div>
-      {error && <p className="capture-error">{error}</p>}
-    </form>
+      ) : (
+        <>
+          {mode === "docked" && onCollapse && (
+            <button type="button" className="capture-scrim" onClick={onCollapse}
+              aria-label="收起输入框" />
+          )}
+          <form
+            className={`capture ${submitting ? "is-processing" : ""}`}
+            onSubmit={onSubmit}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              chooseFile(event.dataTransfer.files[0]);
+            }}
+          >
+            {mode === "docked" && onCollapse && (
+              <button type="button" className="capture-collapse" onClick={onCollapse}>
+                <Minimize2 size={13} /> 收起
+              </button>
+            )}
+            <div className="capture-mark" aria-hidden="true">
+              <Sparkles size={18} strokeWidth={1.8} />
+            </div>
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={onKeyDown}
+              onPaste={(event) => {
+                const pasted = Array.from(event.clipboardData.items).find((item) =>
+                  item.type.startsWith("image/")
+                );
+                const pastedFile = pasted?.getAsFile();
+                if (pastedFile) chooseFile(pastedFile);
+              }}
+              rows={3}
+              autoFocus={initialTopicId === "auto"}
+              placeholder="想到的事，先放在这里……"
+              aria-label="记录一件事"
+              readOnly={submitting}
+            />
+
+            {preview && (
+              <div className="capture-preview">
+                {/* blob URL 只用于本地预览 */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={preview} alt="待上传的截图" />
+                <button type="button" onClick={clearFile} disabled={submitting} aria-label="移除截图">
+                  <X size={15} />
+                </button>
+              </div>
+            )}
+
+            <label className="capture-topic">
+              <FolderOpen size={14} aria-hidden="true" />
+              <span>话题</span>
+              <select aria-label="归入话题" value={topicChoice} disabled={submitting}
+                onChange={(event) => setTopicChoice(event.target.value)}>
+                <option value="auto">AI 自动归类</option>
+                <option value="none">未归类</option>
+                {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
+                {justCreated && !topics.some((topic) => topic.id === justCreated.id) &&
+                  <option value={justCreated.id}>{justCreated.name}</option>}
+              </select>
+            </label>
+
+            <div className="capture-footer">
+              <div className="capture-tools">
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  hidden
+                  disabled={submitting}
+                  onChange={(event) => chooseFile(event.target.files?.[0])}
+                />
+                <button
+                  type="button"
+                  className="quiet-button"
+                  aria-label="添加截图"
+                  disabled={submitting}
+                  onClick={() => inputRef.current?.click()}
+                >
+                  <ImagePlus size={17} />
+                  <span>截图</span>
+                </button>
+                <span className="capture-hint">支持文字、链接和粘贴图片</span>
+              </div>
+              <button
+                className="place-button"
+                type="submit"
+                disabled={submitting || (!text.trim() && !file)}
+              >
+                {submitting ? (
+                  <>
+                    <LoaderCircle className="spin" size={17} /> 正在整理
+                  </>
+                ) : (
+                  <>
+                    安放 <span className="shortcut">⌘↵</span>
+                  </>
+                )}
+              </button>
+            </div>
+            {error && <p className="capture-error">{error}</p>}
+          </form>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -947,6 +995,9 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
   const [activeCategory, setActiveCategory] = useState<ItemCategory | null>(null);
   const [collectionReturn, setCollectionReturn] = useState<{ tab: Tab; topicId: string | null }>({ tab: "topics", topicId: null });
   const [toast, setToast] = useState<Toast>(null);
+  const [composerMode, setComposerMode] = useState<ComposerMode>("full");
+  const [todayGroup, setTodayGroup] = useState<TodayGroupId | null>(null);
+  const lastScrollYRef = useRef(0);
   const [notificationState, setNotificationState] = useState<NotificationPermission | "unsupported">(
     "unsupported"
   );
@@ -984,6 +1035,34 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
     return () => window.clearInterval(timer);
   }, [refresh]);
 
+  useEffect(() => {
+    if (tab !== "today") return;
+    const collapseThreshold = window.innerWidth <= 820 ? 56 : 72;
+    const expandThreshold = 24;
+    const startingY = window.scrollY;
+    lastScrollYRef.current = startingY >= collapseThreshold ? startingY - 3 : startingY;
+    let frame: number | null = null;
+    const updateComposer = () => {
+      const nextY = window.scrollY;
+      if (nextY < expandThreshold) {
+        setComposerMode("full");
+      } else if (nextY >= collapseThreshold && nextY > lastScrollYRef.current + 2) {
+        setComposerMode("compact");
+      }
+      lastScrollYRef.current = nextY;
+      frame = null;
+    };
+    const onScroll = () => {
+      if (frame === null) frame = window.requestAnimationFrame(updateComposer);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    frame = window.requestAnimationFrame(updateComposer);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [tab]);
+
   const handleChange = (message?: string) => {
     if (message) setToast({ message, tone: "success" });
     void refresh().catch(() => setToast({ message: "已保存，但列表刷新失败，请稍后重试。", tone: "error" }));
@@ -995,6 +1074,7 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
   const navigate = (next: Tab) => {
     setActiveCategory(null);
     setTab(next);
+    setComposerMode("full");
     window.scrollTo({ top: 0, behavior: "instant" });
   };
   const selectTopic = (id: string | null) => {
@@ -1025,6 +1105,60 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
     const hour = new Date().getHours();
     return hour < 11 ? "早上好" : hour < 18 ? "下午好" : "晚上好";
   }, []);
+  const todayGroups = [
+    {
+      id: "important" as const,
+      tabLabel: "要紧",
+      title: "今天要紧的事",
+      eyebrow: "先把有限的注意力留给这里",
+      items: data.today,
+      icon: <SunMedium size={16} />,
+      planningActions: false,
+      empty: "今天暂时没有必须优先处理的事。"
+    },
+    {
+      id: "doing" as const,
+      tabLabel: "进行中",
+      title: "正在做",
+      eyebrow: "今天已经开始的事",
+      items: data.doing,
+      icon: <Play size={16} />,
+      planningActions: false,
+      empty: "还没有开始中的事项。"
+    },
+    {
+      id: "quick" as const,
+      tabLabel: "顺手",
+      title: "顺手处理",
+      eyebrow: "适合短暂空闲",
+      items: data.quick,
+      icon: <Check size={16} />,
+      planningActions: false,
+      empty: "现在没有适合顺手处理的小事。"
+    },
+    {
+      id: "review" as const,
+      tabLabel: "重新想起",
+      title: "重新想起",
+      eyebrow: "每次最多三件，由你决定下一步",
+      items: data.review,
+      icon: <RotateCcw size={16} />,
+      planningActions: true,
+      empty: "暂时没有需要重新拿回眼前的事项。"
+    },
+    {
+      id: "inbox" as const,
+      tabLabel: "待确认",
+      title: "需要你确认",
+      eyebrow: "AI 没有替你猜",
+      items: data.inbox,
+      icon: <Inbox size={16} />,
+      planningActions: false,
+      empty: "没有需要你补充确认的内容。"
+    }
+  ];
+  const defaultTodayGroupId = todayGroups.find((group) => group.items.length)?.id || "important";
+  const activeTodayGroupId = todayGroup || defaultTodayGroupId;
 
   const requestNotifications = async () => {
     if (!remindersEnabled) return;
@@ -1137,6 +1271,9 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
               <CaptureComposer
                 topics={data.topics}
                 onCaptured={handleCaptured}
+                mode={composerMode}
+                onExpand={() => setComposerMode("docked")}
+                onCollapse={() => setComposerMode("compact")}
               />
             </section>
 
@@ -1146,52 +1283,52 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
               </div>
             ) : (
               <div className="sections-wrap">
-                <Section
-                  {...sectionProps}
-                  title="需要你确认"
-                  eyebrow="AI 没有替你猜"
-                  items={data.inbox}
-                  onChange={handleChange}
-                  icon={<Inbox size={17} />}
-                />
-                <Section
-                  {...sectionProps}
-                  title="正在做"
-                  eyebrow="今天已经开始的事"
-                  items={data.doing}
-                  icon={<Play size={17} />}
-                />
-                <Section
-                  {...sectionProps}
-                  title="重新想起"
-                  eyebrow="每次最多三件，由你决定下一步"
-                  items={data.review}
-                  icon={<RotateCcw size={17} />}
-                  planningActions
-                />
-                <Section
-                  {...sectionProps}
-                  title="今天要紧的事"
-                  eyebrow="先把有限的注意力留给这里"
-                  items={data.today}
-                  onChange={handleChange}
-                  icon={<SunMedium size={17} />}
-                />
-                <Section
-                  {...sectionProps}
-                  title="顺手处理"
-                  eyebrow="适合短暂空闲"
-                  items={data.quick}
-                  onChange={handleChange}
-                  icon={<Check size={17} />}
-                />
-                {todayEmpty && (
-                  <div className="empty-state">
-                    <div className="empty-orbit"><span /></div>
-                    <h2>今天暂时没有催促你的事</h2>
-                    <p>想到什么就放在上面。没有事情，也很好。</p>
+                <nav className="today-task-tabs" role="tablist" aria-label="今日任务分类">
+                  {todayGroups.map((group) => (
+                    <button key={group.id} type="button" role="tab"
+                      id={`today-tab-${group.id}`}
+                      aria-selected={group.id === activeTodayGroupId}
+                      aria-controls={`today-panel-${group.id}`}
+                      tabIndex={group.id === activeTodayGroupId ? 0 : -1}
+                      className={group.id === activeTodayGroupId ? "active" : ""}
+                      onClick={() => setTodayGroup(group.id)}
+                      onKeyDown={(event) => {
+                        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                        event.preventDefault();
+                        const current = todayGroups.findIndex((entry) => entry.id === group.id);
+                        const nextIndex = event.key === "Home"
+                          ? 0
+                          : event.key === "End"
+                            ? todayGroups.length - 1
+                            : (current + (event.key === "ArrowRight" ? 1 : -1) + todayGroups.length) % todayGroups.length;
+                        const nextGroup = todayGroups[nextIndex]!;
+                        setTodayGroup(nextGroup.id);
+                        window.requestAnimationFrame(() => document.getElementById(`today-tab-${nextGroup.id}`)?.focus());
+                      }}>
+                      <span className="today-tab-icon">{group.icon}</span>
+                      <span>{group.tabLabel}</span>
+                      <em>{group.items.length}</em>
+                    </button>
+                  ))}
+                </nav>
+                {todayGroups.map((group) => (
+                  <div key={group.id} className="today-tab-panel" role="tabpanel"
+                    id={`today-panel-${group.id}`}
+                    aria-labelledby={`today-tab-${group.id}`}
+                    hidden={group.id !== activeTodayGroupId}>
+                    {group.items.length ? (
+                      <Section {...sectionProps} title={group.title}
+                        eyebrow={group.eyebrow} items={group.items}
+                        icon={group.icon} planningActions={group.planningActions} />
+                    ) : (
+                      <div className="empty-state compact today-group-empty">
+                        {todayEmpty ? <div className="empty-orbit"><span /></div> : group.icon}
+                        <h2>{todayEmpty ? "今天暂时没有催促你的事" : `${group.tabLabel}里暂时没有事项`}</h2>
+                        <p>{todayEmpty ? "想到什么就放在上面。没有事情，也很好。" : group.empty}</p>
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
             )}
           </>
