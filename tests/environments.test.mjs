@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { ensureDataDirectory, getRuntimeConfig } from "../lib/runtime-config.mjs";
+import { getAllowedDevOrigins } from "../lib/dev-origins.ts";
 import { migrateProduction } from "../scripts/migrate-production.mjs";
 
 async function isolated(run) {
@@ -44,6 +45,21 @@ test("development, production, and automated tests have separate default directo
   ensureDataDirectory(dev);
   assert.ok(!existsSync(prod.dataDir));
 }));
+
+test("development allows private LAN origins without exposing public interfaces", () => {
+  const address = (value, internal = false) => ({
+    address: value, netmask: "255.255.255.0", family: "IPv4", mac: "00:00:00:00:00:00",
+    internal, cidr: `${value}/24`
+  });
+  const origins = getAllowedDevOrigins({
+    wifi: [address("10.160.33.37")],
+    home: [address("192.168.1.7")],
+    vpn: [address("172.31.1.3")],
+    public: [address("8.8.8.8")],
+    loopback: [address("127.0.0.1", true)]
+  }, "devbox.local, 10.160.33.37");
+  assert.deepEqual(origins, ["127.0.0.1", "10.160.33.37", "192.168.1.7", "172.31.1.3", "devbox.local"]);
+});
 
 test("shared legacy DATA_DIR and misspelled environment names fail closed", () => isolated(async (root) => {
   assert.throws(() => config(root, "prodution"), /ANFANG_ENV/);
