@@ -155,8 +155,13 @@ function CaptureComposer({
   const [preview, setPreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shouldInitialFocus] = useState(() => mode === "full" && initialTopicId === "auto");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (shouldInitialFocus) textareaRef.current?.focus({ preventScroll: true });
+  }, [shouldInitialFocus]);
 
   useEffect(
     () => () => {
@@ -294,7 +299,6 @@ function CaptureComposer({
                 if (pastedFile) chooseFile(pastedFile);
               }}
               rows={3}
-              autoFocus={initialTopicId === "auto"}
               placeholder="想到的事，先放在这里……"
               aria-label="记录一件事"
               readOnly={submitting}
@@ -1041,6 +1045,10 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
     const startingY = window.scrollY;
     lastScrollYRef.current = startingY >= collapseThreshold ? startingY - 3 : startingY;
     let frame: number | null = null;
+    let touchStartY: number | null = null;
+    const expandFromPull = () => {
+      setComposerMode((current) => current === "compact" ? "full" : current);
+    };
     const updateComposer = () => {
       const nextY = window.scrollY;
       if (nextY >= collapseThreshold && nextY > lastScrollYRef.current + 2) {
@@ -1055,10 +1063,34 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
     const onScroll = () => {
       if (frame === null) frame = window.requestAnimationFrame(updateComposer);
     };
+    const onTouchStart = (event: TouchEvent) => {
+      touchStartY = event.touches[0]?.clientY ?? null;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const currentY = event.touches[0]?.clientY;
+      if (touchStartY !== null && currentY !== undefined && window.scrollY <= 8 && currentY - touchStartY >= 36) {
+        expandFromPull();
+        touchStartY = null;
+      }
+    };
+    const onTouchEnd = () => { touchStartY = null; };
+    const onWheel = (event: WheelEvent) => {
+      if (window.scrollY <= 8 && event.deltaY < -8) expandFromPull();
+    };
     window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("touchend", onTouchEnd, { passive: true });
+    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    window.addEventListener("wheel", onWheel, { passive: true });
     frame = window.requestAnimationFrame(updateComposer);
     return () => {
       window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", onTouchEnd);
+      window.removeEventListener("touchcancel", onTouchEnd);
+      window.removeEventListener("wheel", onWheel);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
   }, [tab]);
