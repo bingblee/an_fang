@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { ensureDataDirectory, getRuntimeConfig } from "../lib/runtime-config.mjs";
 import { getAllowedDevOrigins } from "../lib/dev-origins.ts";
 import { migrateProduction } from "../scripts/migrate-production.mjs";
+import { refreshDevelopmentData } from "../scripts/refresh-development-data.mjs";
 
 async function isolated(run) {
   const root = mkdtempSync(join(tmpdir(), "anfang-environment-test-"));
@@ -60,6 +61,45 @@ test("development allows private LAN origins without exposing public interfaces"
   }, "devbox.local, 10.160.33.37");
   assert.deepEqual(origins, ["127.0.0.1", "10.160.33.37", "192.168.1.7", "172.31.1.3", "devbox.local"]);
 });
+
+test("production data refresh replaces development safely and rewrites attachment paths", () => isolated(async (root) => {
+  const prod = config(root), dev = config(root, "development");
+  ensureDataDirectory(prod); ensureDataDirectory(dev);
+  const upload = join(prod.dataDir, "uploads", "2026", "sample.png");
+  mkdirSync(join(prod.dataDir, "uploads", "2026"), { recursive: true });
+  writeFileSync(upload, "synthetic production image");
+  const prodDb = new DatabaseSync(prod.databasePath);
+  prodDb.exec(`CREATE TABLE captures (id TEXT PRIMARY KEY);
+    CREATE TABLE items (id TEXT PRIMARY KEY);
+    CREATE TABLE topics (id TEXT PRIMARY KEY);
+    CREATE TABLE notebook_notes (id TEXT PRIMARY KEY);
+    CREATE TABLE attachments (id TEXT PRIMARY KEY, storage_path TEXT, sha256 TEXT);
+    CREATE TABLE push_subscriptions (endpoint TEXT PRIMARY KEY);`);
+  prodDb.prepare("INSERT INTO captures VALUES ('production')").run();
+  prodDb.prepare("INSERT INTO items VALUES ('production-item')").run();
+  prodDb.prepare("INSERT INTO attachments VALUES ('image', ?, ?)").run(upload, hash(upload));
+  prodDb.prepare("INSERT INTO push_subscriptions VALUES ('https://push.example.test')").run();
+  prodDb.close();
+  const devDb = new DatabaseSync(dev.databasePath);
+  devDb.exec("CREATE TABLE captures (id TEXT PRIMARY KEY); INSERT INTO captures VALUES ('previous-development');");
+  devDb.close();
+  const productionHash = hash(prod.databasePath);
+
+  await assert.rejects(refreshDevelopmentData({ env: { DATA_ROOT: root } }), /停止开发服务/);
+  const result = await refreshDevelopmentData({ env: { DATA_ROOT: root }, confirmDevStopped: true });
+  const refreshed = new DatabaseSync(dev.databasePath, { readOnly: true });
+  assert.equal(refreshed.prepare("SELECT id FROM captures").get().id, "production");
+  assert.equal(refreshed.prepare("SELECT count(*) AS count FROM push_subscriptions").get().count, 0);
+  const copiedAttachment = refreshed.prepare("SELECT storage_path FROM attachments").get().storage_path;
+  refreshed.close();
+  assert.ok(copiedAttachment.startsWith(join(dev.dataDir, "uploads")));
+  assert.equal(hash(copiedAttachment), hash(upload));
+  assert.equal(hash(prod.databasePath), productionHash, "Production database must remain unchanged");
+  const previous = new DatabaseSync(join(result.backupPath, "app.db"), { readOnly: true });
+  assert.equal(previous.prepare("SELECT id FROM captures").get().id, "previous-development");
+  previous.close();
+  assert.equal(JSON.parse(readFileSync(join(dev.dataDir, ".anfang-environment.json"), "utf8")).environment, "development");
+}));
 
 test("shared legacy DATA_DIR and misspelled environment names fail closed", () => isolated(async (root) => {
   assert.throws(() => config(root, "prodution"), /ANFANG_ENV/);

@@ -1038,16 +1038,16 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
   useEffect(() => {
     if (tab !== "today") return;
     const collapseThreshold = window.innerWidth <= 820 ? 56 : 72;
-    const expandThreshold = 24;
     const startingY = window.scrollY;
     lastScrollYRef.current = startingY >= collapseThreshold ? startingY - 3 : startingY;
     let frame: number | null = null;
     const updateComposer = () => {
       const nextY = window.scrollY;
-      if (nextY < expandThreshold) {
-        setComposerMode("full");
-      } else if (nextY >= collapseThreshold && nextY > lastScrollYRef.current + 2) {
-        setComposerMode("compact");
+      if (nextY >= collapseThreshold && nextY > lastScrollYRef.current + 2) {
+        // Compacting changes the document height. Keep this transition one-way
+        // until the user clicks the prompt, otherwise a short page can bounce
+        // across the threshold and make the composer flash continuously.
+        setComposerMode((current) => current === "full" ? "compact" : current);
       }
       lastScrollYRef.current = nextY;
       frame = null;

@@ -7,6 +7,7 @@
     "build": "node scripts/run.mjs build",
     "start": "node scripts/run.mjs start",
     "db:migrate": "node scripts/migrate-production.mjs",
+    "db:refresh-dev": "node scripts/refresh-development-data.mjs",
     "lint": "eslint .",
     "test": "node --test tests/*.test.mjs"
   },
