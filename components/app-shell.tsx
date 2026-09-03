@@ -31,6 +31,7 @@ import Image from "next/image";
 import {
   FormEvent,
   KeyboardEvent,
+  Ref,
   useCallback,
   useEffect,
   useMemo,
@@ -139,6 +140,7 @@ function CaptureComposer({
   topics,
   initialTopicId = "auto",
   mode = "full",
+  dockRef,
   onExpand,
   onCollapse
 }: {
@@ -146,6 +148,7 @@ function CaptureComposer({
   topics: Topic[];
   initialTopicId?: string;
   mode?: ComposerMode;
+  dockRef?: Ref<HTMLDivElement>;
   onExpand?: () => void;
   onCollapse?: () => void;
 }) {
@@ -253,10 +256,12 @@ function CaptureComposer({
         : "记录一件新事情……";
 
   return (
-    <div className={`capture-dock is-${mode}`}>
-      {mode === "compact" ? (
+    <div ref={dockRef} className={`capture-dock is-${mode}`}>
+      {mode !== "docked" && (
         <button type="button" className="compact-capture" onClick={expand}
-          aria-label={`${compactText}，点击展开输入框`}>
+          aria-label={`${compactText}，点击展开输入框`}
+          aria-hidden={mode !== "compact"}
+          tabIndex={mode === "compact" ? 0 : -1}>
           <span className="compact-capture-mark"><Sparkles size={15} /></span>
           <span className="compact-capture-copy">
             <small>{submitting ? "AI 正在整理" : "随手安放"}</small>
@@ -264,113 +269,112 @@ function CaptureComposer({
           </span>
           <span className="compact-capture-action">点击展开 <Maximize2 size={13} /></span>
         </button>
-      ) : (
-        <>
-          {mode === "docked" && onCollapse && (
-            <button type="button" className="capture-scrim" onClick={onCollapse}
-              aria-label="收起输入框" />
-          )}
-          <form
-            className={`capture ${submitting ? "is-processing" : ""}`}
-            onSubmit={onSubmit}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => {
-              event.preventDefault();
-              chooseFile(event.dataTransfer.files[0]);
-            }}
-          >
-            {mode === "docked" && onCollapse && (
-              <button type="button" className="capture-collapse" onClick={onCollapse}>
-                <Minimize2 size={13} /> 收起
-              </button>
-            )}
-            <div className="capture-mark" aria-hidden="true">
-              <Sparkles size={18} strokeWidth={1.8} />
-            </div>
-            <textarea
-              ref={textareaRef}
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              onKeyDown={onKeyDown}
-              onPaste={(event) => {
-                const pasted = Array.from(event.clipboardData.items).find((item) =>
-                  item.type.startsWith("image/")
-                );
-                const pastedFile = pasted?.getAsFile();
-                if (pastedFile) chooseFile(pastedFile);
-              }}
-              rows={3}
-              placeholder="想到的事，先放在这里……"
-              aria-label="记录一件事"
-              readOnly={submitting}
-            />
-
-            {preview && (
-              <div className="capture-preview">
-                {/* blob URL 只用于本地预览 */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={preview} alt="待上传的截图" />
-                <button type="button" onClick={clearFile} disabled={submitting} aria-label="移除截图">
-                  <X size={15} />
-                </button>
-              </div>
-            )}
-
-            <label className="capture-topic">
-              <FolderOpen size={14} aria-hidden="true" />
-              <span>话题</span>
-              <select aria-label="归入话题" value={topicChoice} disabled={submitting}
-                onChange={(event) => setTopicChoice(event.target.value)}>
-                <option value="auto">AI 自动归类</option>
-                <option value="none">未归类</option>
-                {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
-                {justCreated && !topics.some((topic) => topic.id === justCreated.id) &&
-                  <option value={justCreated.id}>{justCreated.name}</option>}
-              </select>
-            </label>
-
-            <div className="capture-footer">
-              <div className="capture-tools">
-                <input
-                  ref={inputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/gif,image/webp"
-                  hidden
-                  disabled={submitting}
-                  onChange={(event) => chooseFile(event.target.files?.[0])}
-                />
-                <button
-                  type="button"
-                  className="quiet-button"
-                  aria-label="添加截图"
-                  disabled={submitting}
-                  onClick={() => inputRef.current?.click()}
-                >
-                  <ImagePlus size={17} />
-                  <span>截图</span>
-                </button>
-                <span className="capture-hint">支持文字、链接和粘贴图片</span>
-              </div>
-              <button
-                className="place-button"
-                type="submit"
-                disabled={submitting || (!text.trim() && !file)}
-              >
-                {submitting ? (
-                  <>
-                    <LoaderCircle className="spin" size={17} /> 正在整理
-                  </>
-                ) : (
-                  <>
-                    安放 <span className="shortcut">⌘↵</span>
-                  </>
-                )}
-              </button>
-            </div>
-            {error && <p className="capture-error">{error}</p>}
-          </form>
-        </>
       )}
+      {mode === "docked" && onCollapse && (
+        <button type="button" className="capture-scrim" onClick={onCollapse}
+          aria-label="收起输入框" />
+      )}
+      <form
+        className={`capture ${submitting ? "is-processing" : ""}`}
+        aria-hidden={mode === "compact"}
+        inert={mode === "compact"}
+        onSubmit={onSubmit}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          chooseFile(event.dataTransfer.files[0]);
+        }}
+      >
+        {mode === "docked" && onCollapse && (
+          <button type="button" className="capture-collapse" onClick={onCollapse}>
+            <Minimize2 size={13} /> 收起
+          </button>
+        )}
+        <div className="capture-mark" aria-hidden="true">
+          <Sparkles size={18} strokeWidth={1.8} />
+        </div>
+        <textarea
+          ref={textareaRef}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={onKeyDown}
+          onPaste={(event) => {
+            const pasted = Array.from(event.clipboardData.items).find((item) =>
+              item.type.startsWith("image/")
+            );
+            const pastedFile = pasted?.getAsFile();
+            if (pastedFile) chooseFile(pastedFile);
+          }}
+          rows={3}
+          placeholder="想到的事，先放在这里……"
+          aria-label="记录一件事"
+          readOnly={submitting}
+        />
+
+        {preview && (
+          <div className="capture-preview">
+            {/* blob URL 只用于本地预览 */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={preview} alt="待上传的截图" />
+            <button type="button" onClick={clearFile} disabled={submitting} aria-label="移除截图">
+              <X size={15} />
+            </button>
+          </div>
+        )}
+
+        <label className="capture-topic">
+          <FolderOpen size={14} aria-hidden="true" />
+          <span>话题</span>
+          <select aria-label="归入话题" value={topicChoice} disabled={submitting}
+            onChange={(event) => setTopicChoice(event.target.value)}>
+            <option value="auto">AI 自动归类</option>
+            <option value="none">未归类</option>
+            {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
+            {justCreated && !topics.some((topic) => topic.id === justCreated.id) &&
+              <option value={justCreated.id}>{justCreated.name}</option>}
+          </select>
+        </label>
+
+        <div className="capture-footer">
+          <div className="capture-tools">
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              hidden
+              disabled={submitting}
+              onChange={(event) => chooseFile(event.target.files?.[0])}
+            />
+            <button
+              type="button"
+              className="quiet-button"
+              aria-label="添加截图"
+              disabled={submitting}
+              onClick={() => inputRef.current?.click()}
+            >
+              <ImagePlus size={17} />
+              <span>截图</span>
+            </button>
+            <span className="capture-hint">支持文字、链接和粘贴图片</span>
+          </div>
+          <button
+            className="place-button"
+            type="submit"
+            disabled={submitting || (!text.trim() && !file)}
+          >
+            {submitting ? (
+              <>
+                <LoaderCircle className="spin" size={17} /> 正在整理
+              </>
+            ) : (
+              <>
+                安放 <span className="shortcut">⌘↵</span>
+              </>
+            )}
+          </button>
+        </div>
+        {error && <p className="capture-error">{error}</p>}
+      </form>
     </div>
   );
 }
@@ -1003,7 +1007,8 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
   const [toast, setToast] = useState<Toast>(null);
   const [composerMode, setComposerMode] = useState<ComposerMode>("full");
   const [todayGroup, setTodayGroup] = useState<TodayGroupId | null>(null);
-  const lastScrollYRef = useRef(0);
+  const composerDockRef = useRef<HTMLDivElement>(null);
+  const composerProgressRef = useRef(0);
   const [notificationState, setNotificationState] = useState<NotificationPermission | "unsupported">(
     "unsupported"
   );
@@ -1043,56 +1048,29 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
 
   useEffect(() => {
     if (tab !== "today") return;
-    const collapseThreshold = window.innerWidth <= 820 ? 56 : 72;
-    const startingY = window.scrollY;
-    lastScrollYRef.current = startingY >= collapseThreshold ? startingY - 3 : startingY;
     let frame: number | null = null;
-    let touchStartY: number | null = null;
-    const expandFromPull = () => {
-      setComposerMode((current) => current === "compact" ? "full" : current);
-    };
     const updateComposer = () => {
-      const nextY = window.scrollY;
-      if (nextY >= collapseThreshold && nextY > lastScrollYRef.current + 2) {
-        // Compacting changes the document height. Keep this transition one-way
-        // until the user clicks the prompt, otherwise a short page can bounce
-        // across the threshold and make the composer flash continuously.
-        setComposerMode((current) => current === "full" ? "compact" : current);
-      }
-      lastScrollYRef.current = nextY;
+      const travel = window.innerWidth <= 820 ? 140 : 180;
+      const progress = Math.min(1, Math.max(0, window.scrollY / travel));
+      composerProgressRef.current = progress;
+      composerDockRef.current?.style.setProperty("--capture-progress", progress.toFixed(4));
+      setComposerMode((current) => {
+        if (current === "docked") return current;
+        if (progress >= 0.64) return "compact";
+        if (progress <= 0.36) return "full";
+        return current;
+      });
       frame = null;
     };
-    const onScroll = () => {
+    const requestUpdate = () => {
       if (frame === null) frame = window.requestAnimationFrame(updateComposer);
     };
-    const onTouchStart = (event: TouchEvent) => {
-      touchStartY = event.touches[0]?.clientY ?? null;
-    };
-    const onTouchMove = (event: TouchEvent) => {
-      const currentY = event.touches[0]?.clientY;
-      if (touchStartY !== null && currentY !== undefined && window.scrollY <= 8 && currentY - touchStartY >= 36) {
-        expandFromPull();
-        touchStartY = null;
-      }
-    };
-    const onTouchEnd = () => { touchStartY = null; };
-    const onWheel = (event: WheelEvent) => {
-      if (window.scrollY <= 8 && event.deltaY < -8) expandFromPull();
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("touchstart", onTouchStart, { passive: true });
-    window.addEventListener("touchmove", onTouchMove, { passive: true });
-    window.addEventListener("touchend", onTouchEnd, { passive: true });
-    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
-    window.addEventListener("wheel", onWheel, { passive: true });
+    window.addEventListener("scroll", requestUpdate, { passive: true });
+    window.addEventListener("resize", requestUpdate);
     frame = window.requestAnimationFrame(updateComposer);
     return () => {
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("touchstart", onTouchStart);
-      window.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("touchend", onTouchEnd);
-      window.removeEventListener("touchcancel", onTouchEnd);
-      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("scroll", requestUpdate);
+      window.removeEventListener("resize", requestUpdate);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
   }, [tab]);
@@ -1121,6 +1099,8 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
     setActiveCategory(null);
     setTab(next);
     setComposerMode("full");
+    composerProgressRef.current = 0;
+    composerDockRef.current?.style.setProperty("--capture-progress", "0");
     window.scrollTo({ top: 0, behavior: "instant" });
   };
   const selectTopic = (id: string | null) => {
@@ -1321,8 +1301,9 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
                 topics={data.topics}
                 onCaptured={handleCaptured}
                 mode={composerMode}
+                dockRef={composerDockRef}
                 onExpand={() => setComposerMode("docked")}
-                onCollapse={() => setComposerMode("compact")}
+                onCollapse={() => setComposerMode(composerProgressRef.current >= 0.5 ? "compact" : "full")}
               />
             </section>
 

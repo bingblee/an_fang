@@ -395,10 +395,13 @@ a:focus-visible {
   letter-spacing: -0.03em;
 }
 
-.capture-dock { min-height: 254px; transition: min-height 220ms cubic-bezier(0.22, 1, 0.36, 1); }
-.capture-dock.is-compact, .capture-dock.is-docked { min-height: 58px; }
+.capture-dock {
+  --capture-progress: 0;
+  position: relative;
+  min-height: 254px;
+}
 
-.capture-dock.is-compact::before {
+.capture-dock:not(.is-docked)::before {
   content: "";
   position: fixed;
   z-index: 17;
@@ -407,7 +410,10 @@ a:focus-visible {
   left: 236px;
   height: 82px;
   background: linear-gradient(to bottom, var(--canvas) 78%, transparent);
+  opacity: var(--capture-progress);
+  filter: blur(calc((1 - var(--capture-progress)) * 4px));
   pointer-events: none;
+  will-change: opacity, filter;
 }
 
 .compact-capture {
@@ -434,7 +440,14 @@ a:focus-visible {
   text-align: left;
   cursor: text;
   backdrop-filter: blur(20px);
-  animation: compact-capture-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  opacity: var(--capture-progress);
+  filter: blur(calc((1 - var(--capture-progress)) * 6px))
+    saturate(calc(0.82 + var(--capture-progress) * 0.18));
+  transform: translateY(calc((1 - var(--capture-progress)) * -10px))
+    scale(calc(0.985 + var(--capture-progress) * 0.015));
+  transform-origin: top center;
+  pointer-events: none;
+  will-change: opacity, transform, filter;
 }
 
 .compact-capture::after {
@@ -445,7 +458,12 @@ a:focus-visible {
   background: var(--signal);
 }
 
-.compact-capture:hover { border-color: var(--signal); transform: translateY(-1px); }
+.capture-dock.is-compact .compact-capture { pointer-events: auto; }
+
+.capture-dock.is-compact .compact-capture:hover {
+  border-color: var(--signal);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--signal) 12%, transparent);
+}
 
 .compact-capture-mark {
   width: 34px;
@@ -508,6 +526,9 @@ a:focus-visible {
   max-height: calc(100vh - 36px);
   margin: 0 auto;
   overflow-y: auto;
+  opacity: 1;
+  filter: none;
+  transform: none;
   animation: docked-capture-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -540,7 +561,22 @@ a:focus-visible {
   border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
-  transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.capture-dock:not(.is-docked) .capture {
+  opacity: calc(1 - var(--capture-progress));
+  filter: blur(calc(var(--capture-progress) * 7px))
+    saturate(calc(1 - var(--capture-progress) * 0.16));
+  transform: translateY(calc(var(--capture-progress) * -14px))
+    scale(calc(1 - var(--capture-progress) * 0.018));
+  transform-origin: top center;
+  will-change: opacity, transform, filter;
+}
+
+.capture-dock.is-compact .capture {
+  pointer-events: none;
+  user-select: none;
 }
 
 .capture::before {
@@ -1645,7 +1681,6 @@ a:focus-visible {
 @keyframes deck-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes section-in { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes toast-in { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes compact-capture-in { from { opacity: 0; transform: translateY(-10px) scale(0.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes docked-capture-in { from { opacity: 0; transform: translateY(-8px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 @media (max-width: 1080px) {
@@ -1656,7 +1691,7 @@ a:focus-visible {
   .capture-hint { display: none; }
   .compact-capture,
   .capture-dock.is-docked .capture { right: 34px; left: 238px; }
-  .capture-dock.is-compact::before { left: 204px; }
+  .capture-dock:not(.is-docked)::before { left: 204px; }
 }
 
 @media (max-width: 820px) {
@@ -1699,8 +1734,7 @@ a:focus-visible {
 
   .capture { min-height: 242px; padding: 51px 17px 15px; }
   .capture-dock { min-height: 242px; }
-  .capture-dock.is-compact, .capture-dock.is-docked { min-height: 58px; }
-  .capture-dock.is-compact::before { left: 0; height: 70px; }
+  .capture-dock:not(.is-docked)::before { left: 0; height: 70px; }
   .compact-capture {
     top: 10px;
     right: 14px;
@@ -1816,5 +1850,11 @@ a:focus-visible {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .capture-dock:not(.is-docked) .capture,
+  .compact-capture,
+  .capture-dock:not(.is-docked)::before {
+    filter: none;
   }
 }
