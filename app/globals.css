@@ -241,7 +241,7 @@ a:focus-visible {
   margin-top: auto;
   padding-top: 18px;
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   align-items: center;
   gap: 8px;
   border-top: 1px solid var(--line);
@@ -268,7 +268,7 @@ a:focus-visible {
   box-shadow: 0 0 0 4px var(--cyan-wash);
 }
 
-.notification-button, .theme-toggle {
+.notification-button, .refresh-button, .theme-toggle {
   width: 34px;
   height: 34px;
   padding: 0;
@@ -284,13 +284,14 @@ a:focus-visible {
 
 .notification-button:hover,
 .notification-button.enabled,
+.refresh-button:hover,
 .theme-toggle:hover {
   border-color: var(--signal-border);
   background: var(--signal-wash);
   color: var(--signal);
 }
 
-.notification-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.notification-button:disabled, .refresh-button:disabled { opacity: 0.45; cursor: not-allowed; }
 .environment-badge {
   width: fit-content;
   margin-top: 18px;

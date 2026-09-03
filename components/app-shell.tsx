@@ -18,6 +18,7 @@ import {
   Paperclip,
   Pencil,
   Play,
+  RefreshCw,
   RotateCcw,
   Sparkles,
   SunMedium,
@@ -994,6 +995,7 @@ function NotebookPage({
 export function AppShell({ environment, remindersEnabled }: { environment: AppEnvironment; remindersEnabled: boolean }) {
   const [data, setData] = useState<DashboardData>(emptyDashboard);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<Tab>("today");
   const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<ItemCategory | null>(null);
@@ -1103,6 +1105,18 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
   const handleCaptured = (message: string, usedAI: boolean, topicOnly?: boolean) => {
     handleChange(usedAI || topicOnly ? message : `${message}（已用本地规则整理）`);
   };
+  const refreshNow = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await refresh();
+      setToast({ message: "内容已刷新。", tone: "neutral" });
+    } catch {
+      setToast({ message: "刷新失败，请稍后再试。", tone: "error" });
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const navigate = (next: Tab) => {
     setActiveCategory(null);
     setTab(next);
@@ -1145,8 +1159,7 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
       eyebrow: "先把有限的注意力留给这里",
       items: data.today,
       icon: <SunMedium size={16} />,
-      planningActions: false,
-      empty: "今天暂时没有必须优先处理的事。"
+      planningActions: false
     },
     {
       id: "doing" as const,
@@ -1155,8 +1168,7 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
       eyebrow: "今天已经开始的事",
       items: data.doing,
       icon: <Play size={16} />,
-      planningActions: false,
-      empty: "还没有开始中的事项。"
+      planningActions: false
     },
     {
       id: "quick" as const,
@@ -1165,8 +1177,7 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
       eyebrow: "适合短暂空闲",
       items: data.quick,
       icon: <Check size={16} />,
-      planningActions: false,
-      empty: "现在没有适合顺手处理的小事。"
+      planningActions: false
     },
     {
       id: "review" as const,
@@ -1175,8 +1186,7 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
       eyebrow: "每次最多三件，由你决定下一步",
       items: data.review,
       icon: <RotateCcw size={16} />,
-      planningActions: true,
-      empty: "暂时没有需要重新拿回眼前的事项。"
+      planningActions: true
     },
     {
       id: "inbox" as const,
@@ -1185,12 +1195,13 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
       eyebrow: "AI 没有替你猜",
       items: data.inbox,
       icon: <Inbox size={16} />,
-      planningActions: false,
-      empty: "没有需要你补充确认的内容。"
+      planningActions: false
     }
   ];
-  const defaultTodayGroupId = todayGroups.find((group) => group.items.length)?.id || "important";
-  const activeTodayGroupId = todayGroup || defaultTodayGroupId;
+  const visibleTodayGroups = todayGroups.filter((group) => group.items.length > 0);
+  const activeTodayGroupId = visibleTodayGroups.some((group) => group.id === todayGroup)
+    ? todayGroup
+    : visibleTodayGroups[0]?.id ?? null;
 
   const requestNotifications = async () => {
     if (!remindersEnabled) return;
@@ -1268,6 +1279,12 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
           <span className={`ai-status ${data.aiEnabled ? "connected" : ""}`}>
             <span /> {data.aiEnabled ? "DeepSeek 已连接" : "本地整理"}
           </span>
+          <button type="button" className="refresh-button" onClick={() => void refreshNow()}
+            disabled={loading || refreshing}
+            title={refreshing ? "正在刷新" : "刷新内容"}
+            aria-label={refreshing ? "正在刷新内容" : "刷新内容"}>
+            <RefreshCw className={refreshing ? "spin" : undefined} size={17} />
+          </button>
           <ThemeToggle />
           <button
             className={`notification-button ${notificationState === "granted" ? "enabled" : ""}`}
@@ -1315,52 +1332,54 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
               </div>
             ) : (
               <div className="sections-wrap">
-                <nav className="today-task-tabs" role="tablist" aria-label="今日任务分类">
-                  {todayGroups.map((group) => (
-                    <button key={group.id} type="button" role="tab"
-                      id={`today-tab-${group.id}`}
-                      aria-selected={group.id === activeTodayGroupId}
-                      aria-controls={`today-panel-${group.id}`}
-                      tabIndex={group.id === activeTodayGroupId ? 0 : -1}
-                      className={group.id === activeTodayGroupId ? "active" : ""}
-                      onClick={() => setTodayGroup(group.id)}
-                      onKeyDown={(event) => {
-                        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-                        event.preventDefault();
-                        const current = todayGroups.findIndex((entry) => entry.id === group.id);
-                        const nextIndex = event.key === "Home"
-                          ? 0
-                          : event.key === "End"
-                            ? todayGroups.length - 1
-                            : (current + (event.key === "ArrowRight" ? 1 : -1) + todayGroups.length) % todayGroups.length;
-                        const nextGroup = todayGroups[nextIndex]!;
-                        setTodayGroup(nextGroup.id);
-                        window.requestAnimationFrame(() => document.getElementById(`today-tab-${nextGroup.id}`)?.focus());
-                      }}>
-                      <span className="today-tab-icon">{group.icon}</span>
-                      <span>{group.tabLabel}</span>
-                      <em>{group.items.length}</em>
-                    </button>
-                  ))}
-                </nav>
-                {todayGroups.map((group) => (
-                  <div key={group.id} className="today-tab-panel" role="tabpanel"
-                    id={`today-panel-${group.id}`}
-                    aria-labelledby={`today-tab-${group.id}`}
-                    hidden={group.id !== activeTodayGroupId}>
-                    {group.items.length ? (
-                      <Section {...sectionProps} title={group.title}
-                        eyebrow={group.eyebrow} items={group.items}
-                        icon={group.icon} planningActions={group.planningActions} />
-                    ) : (
-                      <div className="empty-state compact today-group-empty">
-                        {todayEmpty ? <div className="empty-orbit"><span /></div> : group.icon}
-                        <h2>{todayEmpty ? "今天暂时没有催促你的事" : `${group.tabLabel}里暂时没有事项`}</h2>
-                        <p>{todayEmpty ? "想到什么就放在上面。没有事情，也很好。" : group.empty}</p>
-                      </div>
-                    )}
+                {todayEmpty ? (
+                  <div className="empty-state compact today-group-empty">
+                    <div className="empty-orbit"><span /></div>
+                    <h2>今天暂时没有催促你的事</h2>
+                    <p>想到什么就放在上面。没有事情，也很好。</p>
                   </div>
-                ))}
+                ) : (
+                  <>
+                    <nav className="today-task-tabs" role="tablist" aria-label="今日任务分类">
+                      {visibleTodayGroups.map((group) => (
+                        <button key={group.id} type="button" role="tab"
+                          id={`today-tab-${group.id}`}
+                          aria-selected={group.id === activeTodayGroupId}
+                          aria-controls={`today-panel-${group.id}`}
+                          tabIndex={group.id === activeTodayGroupId ? 0 : -1}
+                          className={group.id === activeTodayGroupId ? "active" : ""}
+                          onClick={() => setTodayGroup(group.id)}
+                          onKeyDown={(event) => {
+                            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                            event.preventDefault();
+                            const current = visibleTodayGroups.findIndex((entry) => entry.id === group.id);
+                            const nextIndex = event.key === "Home"
+                              ? 0
+                              : event.key === "End"
+                                ? visibleTodayGroups.length - 1
+                                : (current + (event.key === "ArrowRight" ? 1 : -1) + visibleTodayGroups.length) % visibleTodayGroups.length;
+                            const nextGroup = visibleTodayGroups[nextIndex]!;
+                            setTodayGroup(nextGroup.id);
+                            window.requestAnimationFrame(() => document.getElementById(`today-tab-${nextGroup.id}`)?.focus());
+                          }}>
+                          <span className="today-tab-icon">{group.icon}</span>
+                          <span>{group.tabLabel}</span>
+                          <em>{group.items.length}</em>
+                        </button>
+                      ))}
+                    </nav>
+                    {visibleTodayGroups.map((group) => (
+                      <div key={group.id} className="today-tab-panel" role="tabpanel"
+                        id={`today-panel-${group.id}`}
+                        aria-labelledby={`today-tab-${group.id}`}
+                        hidden={group.id !== activeTodayGroupId}>
+                        <Section {...sectionProps} title={group.title}
+                          eyebrow={group.eyebrow} items={group.items}
+                          icon={group.icon} planningActions={group.planningActions} />
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
           </>
