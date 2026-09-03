@@ -31,7 +31,6 @@ import Image from "next/image";
 import {
   FormEvent,
   KeyboardEvent,
-  Ref,
   useCallback,
   useEffect,
   useMemo,
@@ -140,7 +139,6 @@ function CaptureComposer({
   topics,
   initialTopicId = "auto",
   mode = "full",
-  dockRef,
   onExpand,
   onCollapse
 }: {
@@ -148,7 +146,6 @@ function CaptureComposer({
   topics: Topic[];
   initialTopicId?: string;
   mode?: ComposerMode;
-  dockRef?: Ref<HTMLDivElement>;
   onExpand?: () => void;
   onCollapse?: () => void;
 }) {
@@ -256,7 +253,7 @@ function CaptureComposer({
         : "记录一件新事情……";
 
   return (
-    <div ref={dockRef} className={`capture-dock is-${mode}`}>
+    <div className={`capture-dock is-${mode}`}>
       {mode !== "docked" && (
         <button type="button" className="compact-capture" onClick={expand}
           aria-label={`${compactText}，点击展开输入框`}
@@ -1007,8 +1004,7 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
   const [toast, setToast] = useState<Toast>(null);
   const [composerMode, setComposerMode] = useState<ComposerMode>("full");
   const [todayGroup, setTodayGroup] = useState<TodayGroupId | null>(null);
-  const composerDockRef = useRef<HTMLDivElement>(null);
-  const composerProgressRef = useRef(0);
+  const composerCompactRef = useRef(false);
   const [notificationState, setNotificationState] = useState<NotificationPermission | "unsupported">(
     "unsupported"
   );
@@ -1050,15 +1046,19 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
     if (tab !== "today") return;
     let frame: number | null = null;
     const updateComposer = () => {
-      const travel = window.innerWidth <= 820 ? 300 : 360;
-      const scrollProgress = Math.min(1, Math.max(0, window.scrollY / travel));
-      const visualProgress = scrollProgress * scrollProgress * (3 - 2 * scrollProgress);
-      composerProgressRef.current = scrollProgress;
-      composerDockRef.current?.style.setProperty("--capture-progress", visualProgress.toFixed(4));
+      const isMobile = window.innerWidth <= 820;
+      const collapseAt = isMobile ? 108 : 120;
+      const expandAt = isMobile ? 36 : 44;
       setComposerMode((current) => {
         if (current === "docked") return current;
-        if (scrollProgress >= 0.64) return "compact";
-        if (scrollProgress <= 0.36) return "full";
+        if (window.scrollY >= collapseAt) {
+          composerCompactRef.current = true;
+          return "compact";
+        }
+        if (window.scrollY <= expandAt) {
+          composerCompactRef.current = false;
+          return "full";
+        }
         return current;
       });
       frame = null;
@@ -1100,8 +1100,7 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
     setActiveCategory(null);
     setTab(next);
     setComposerMode("full");
-    composerProgressRef.current = 0;
-    composerDockRef.current?.style.setProperty("--capture-progress", "0");
+    composerCompactRef.current = false;
     window.scrollTo({ top: 0, behavior: "instant" });
   };
   const selectTopic = (id: string | null) => {
@@ -1302,9 +1301,8 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
                 topics={data.topics}
                 onCaptured={handleCaptured}
                 mode={composerMode}
-                dockRef={composerDockRef}
                 onExpand={() => setComposerMode("docked")}
-                onCollapse={() => setComposerMode(composerProgressRef.current >= 0.5 ? "compact" : "full")}
+                onCollapse={() => setComposerMode(composerCompactRef.current ? "compact" : "full")}
               />
             </section>
 
