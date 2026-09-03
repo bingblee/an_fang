@@ -1050,14 +1050,15 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
     if (tab !== "today") return;
     let frame: number | null = null;
     const updateComposer = () => {
-      const travel = window.innerWidth <= 820 ? 140 : 180;
-      const progress = Math.min(1, Math.max(0, window.scrollY / travel));
-      composerProgressRef.current = progress;
-      composerDockRef.current?.style.setProperty("--capture-progress", progress.toFixed(4));
+      const travel = window.innerWidth <= 820 ? 300 : 360;
+      const scrollProgress = Math.min(1, Math.max(0, window.scrollY / travel));
+      const visualProgress = scrollProgress * scrollProgress * (3 - 2 * scrollProgress);
+      composerProgressRef.current = scrollProgress;
+      composerDockRef.current?.style.setProperty("--capture-progress", visualProgress.toFixed(4));
       setComposerMode((current) => {
         if (current === "docked") return current;
-        if (progress >= 0.64) return "compact";
-        if (progress <= 0.36) return "full";
+        if (scrollProgress >= 0.64) return "compact";
+        if (scrollProgress <= 0.36) return "full";
         return current;
       });
       frame = null;
