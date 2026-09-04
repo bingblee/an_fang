@@ -51,6 +51,7 @@ import {
   normalizeNotebookQuery,
   searchNotebookNotes
 } from "@/lib/notebook-search.mjs";
+import { MarkdownContent, MarkdownEditor } from "@/components/markdown-note";
 
 type Tab = "today" | "later" | "topics" | "notebook";
 type Toast = { message: string; tone: "success" | "error" | "neutral" } | null;
@@ -857,9 +858,6 @@ function NotebookComposer({
   const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => textareaRef.current?.focus({ preventScroll: true }), []);
 
   const save = async () => {
     if (!content.trim() || busy) return;
@@ -911,18 +909,18 @@ function NotebookComposer({
           onKeyDown={onKeyDown}
         />
       </label>
-      <label>
+      <div className="notebook-markdown-field">
         <span>正文</span>
-        <textarea
-          ref={textareaRef}
+        <MarkdownEditor
           rows={7}
           maxLength={10_000}
           value={content}
-          placeholder="写下想长期保留的内容……"
-          onChange={(event) => setContent(event.target.value)}
-          onKeyDown={onKeyDown}
+          autoFocus
+          placeholder={"写下想长期保留的内容……\n输入 # 标题、- 列表，或从上方选择格式"}
+          onChange={setContent}
+          onSubmitShortcut={() => void save()}
         />
-      </label>
+      </div>
       <div className="notebook-create-footer">
         <span>{content.length ? `${content.length.toLocaleString("zh-CN")} 字符` : "不会生成任务或提醒"}</span>
         <div>
@@ -1026,14 +1024,15 @@ function NotebookCard({
                 <span>摘要</span>
                 <input value={summary} onChange={(event) => setSummary(event.target.value)} />
               </label>
-              <label>
+              <div className="notebook-markdown-field">
                 <span>正文</span>
-                <textarea
+                <MarkdownEditor
                   rows={10}
                   value={content}
-                  onChange={(event) => setContent(event.target.value)}
+                  onChange={setContent}
+                  onSubmitShortcut={() => void save()}
                 />
-              </label>
+              </div>
               <div className="notebook-edit-actions">
                 <button
                   className="primary-small"
@@ -1049,7 +1048,7 @@ function NotebookCard({
             </div>
           ) : (
             <>
-              <div className="notebook-note-body">{note.content}</div>
+              <div className="notebook-note-body"><MarkdownContent content={note.content} /></div>
               <div className="notebook-meta-row">
                 {note.sourceItemTitle && <small>来自事项：{note.sourceItemTitle}</small>}
                 <div className="notebook-actions">
