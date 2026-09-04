@@ -60,7 +60,7 @@ export interface NotebookNote {
   summary: string;
   content: string;
   sourceItemTitle: string | null;
-  provider: "deepseek" | "local";
+  provider: "deepseek" | "local" | "manual";
   createdAt: string;
 }
 

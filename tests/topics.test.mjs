@@ -603,3 +603,32 @@ test("today resurfaces at most three due items and every decision removes one fr
   assert.ok(!after.review.some((item) => ids.slice(0, 3).includes(item.id)));
   assert.ok(after.review.some((item) => item.id === ids[3]));
 });
+
+test("manual notebook notes can be created without a task or AI call", async () => {
+  const itemsBefore = itemCount();
+  const promptsBefore = prompts.length;
+  const notesBefore = Number(db.prepare("SELECT COUNT(*) count FROM notebook_notes").get().count);
+  const created = await api("/api/notebook", "POST", {
+    content: "周末披萨实验\n面团冷藏发酵 24 小时，烤箱提前充分预热。"
+  });
+
+  assert.equal(created.status, 201);
+  assert.equal(created.body.note.title, "周末披萨实验");
+  assert.equal(created.body.note.summary, "面团冷藏发酵 24 小时，烤箱提前充分预热。");
+  assert.equal(created.body.note.provider, "manual");
+  assert.equal(created.body.note.sourceItemTitle, null);
+  assert.equal(created.body.message, "笔记已留下。");
+  assert.equal(itemCount(), itemsBefore);
+  assert.equal(prompts.length, promptsBefore);
+  assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM notebook_notes").get().count), notesBefore + 1);
+  assert.ok((await api("/api/dashboard")).body.notebook.some((note) => note.id === created.body.note.id));
+
+  const titled = await api("/api/notebook", "POST", {
+    title: "  我的配方  ",
+    content: "面粉 300 克"
+  });
+  assert.equal(titled.status, 201);
+  assert.equal(titled.body.note.title, "我的配方");
+  assert.equal((await api("/api/notebook", "POST", { content: "   " })).status, 400);
+  assert.equal((await api("/api/notebook", "POST", { title: "长".repeat(121), content: "正文" })).status, 400);
+});

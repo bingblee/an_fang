@@ -18,8 +18,10 @@ import {
   Paperclip,
   Pencil,
   Play,
+  Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   Sparkles,
   SunMedium,
   Upload,
@@ -43,6 +45,12 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import type { AppEnvironment } from "@/lib/runtime-config.mjs";
 import { categoryIds, categoryLabels } from "@/lib/category-definitions";
 import { CategoryShortcuts, CategoryWorkspace } from "@/components/category-workspace";
+import {
+  notebookSearchSnippet,
+  notebookSearchTerms,
+  normalizeNotebookQuery,
+  searchNotebookNotes
+} from "@/lib/notebook-search.mjs";
 
 type Tab = "today" | "later" | "topics" | "notebook";
 type Toast = { message: string; tone: "success" | "error" | "neutral" } | null;
@@ -822,11 +830,120 @@ function formatNoteDate(value: string) {
   }).format(new Date(value));
 }
 
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  const terms = notebookSearchTerms(query);
+  if (!terms.length) return text;
+  const pattern = terms
+    .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .sort((left, right) => right.length - left.length)
+    .join("|");
+  if (!pattern) return text;
+  const matcher = new RegExp(`(${pattern})`, "giu");
+  return text.split(matcher).map((part, index) =>
+    terms.includes(normalizeNotebookQuery(part))
+      ? <mark className="notebook-search-mark" key={`${part}-${index}`}>{part}</mark>
+      : part
+  );
+}
+
+function NotebookComposer({
+  onCreated,
+  onCancel
+}: {
+  onCreated: (message: string) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => textareaRef.current?.focus({ preventScroll: true }), []);
+
+  const save = async () => {
+    if (!content.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/notebook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim(), content: content.trim() })
+      });
+      const result = (await response.json()) as { error?: string; message?: string };
+      if (!response.ok) throw new Error(result.error || "笔记暂时没有保存成功");
+      onCreated(result.message || "笔记已留下。");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "笔记暂时没有保存成功");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      void save();
+    }
+    if (event.key === "Escape" && !busy) onCancel();
+  };
+
+  return (
+    <form className={`notebook-create ${busy ? "is-busy" : ""}`} onSubmit={(event) => {
+      event.preventDefault();
+      void save();
+    }}>
+      <div className="notebook-create-heading">
+        <div>
+          <span>NEW NOTE / PRIVATE</span>
+          <h2>写一条笔记</h2>
+        </div>
+        <small>标题留空时，会使用正文第一行</small>
+      </div>
+      <label>
+        <span>标题 · 可选</span>
+        <input
+          value={title}
+          maxLength={120}
+          placeholder="给它一个方便找回的名字"
+          onChange={(event) => setTitle(event.target.value)}
+          onKeyDown={onKeyDown}
+        />
+      </label>
+      <label>
+        <span>正文</span>
+        <textarea
+          ref={textareaRef}
+          rows={7}
+          maxLength={10_000}
+          value={content}
+          placeholder="写下想长期保留的内容……"
+          onChange={(event) => setContent(event.target.value)}
+          onKeyDown={onKeyDown}
+        />
+      </label>
+      <div className="notebook-create-footer">
+        <span>{content.length ? `${content.length.toLocaleString("zh-CN")} 字符` : "不会生成任务或提醒"}</span>
+        <div>
+          <button type="button" className="text-button" onClick={onCancel} disabled={busy}>取消</button>
+          <button type="submit" className="primary-small" disabled={busy || !content.trim()}>
+            {busy ? <><LoaderCircle className="spin" size={14} /> 保存中</> : <>保存笔记 <span>⌘↵</span></>}
+          </button>
+        </div>
+      </div>
+      {error && <p className="suggestion-error" role="alert">{error}</p>}
+    </form>
+  );
+}
+
 function NotebookCard({
   note,
+  query,
   onChange
 }: {
   note: NotebookNote;
+  query?: string;
   onChange: (message?: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -892,8 +1009,8 @@ function NotebookCard({
       <button className="notebook-card-heading" onClick={() => setExpanded((value) => !value)}>
         <div>
           <span>{formatNoteDate(note.createdAt)}</span>
-          <h3>{note.title}</h3>
-          <p>{note.summary}</p>
+          <h3><HighlightedText text={note.title} query={query || ""} /></h3>
+          <p><HighlightedText text={query ? notebookSearchSnippet(note, query) : note.summary} query={query || ""} /></p>
         </div>
         <ChevronDown size={17} />
       </button>
@@ -969,24 +1086,74 @@ function NotebookPage({
   notes: NotebookNote[];
   onChange: (message?: string) => void;
 }) {
+  const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState("");
+  const filteredNotes = useMemo(() => searchNotebookNotes(notes, query), [notes, query]);
+  const activeQuery = query.trim();
+
+  const created = (message: string) => {
+    setCreating(false);
+    setQuery("");
+    onChange(message);
+  };
+
   return (
     <section className="notebook-page">
       <div className="later-heading notebook-heading">
-        <p className="date-line">值得留下的内容</p>
-        <h1>笔记本</h1>
-        <p>从事项里保存的做法、清单和参考副本，会安静地留在这里。</p>
+        <div className="notebook-heading-copy">
+          <p className="date-line">值得留下的内容</p>
+          <h1>笔记本</h1>
+          <p>自己的记录，以及从事项里留下的做法、清单和参考。</p>
+        </div>
+        <button className="primary-small" onClick={() => setCreating(true)} disabled={creating}>
+          <Plus size={15} /> 新建笔记
+        </button>
       </div>
-      {notes.length ? (
+
+      {creating && <NotebookComposer onCreated={created} onCancel={() => setCreating(false)} />}
+
+      {notes.length > 0 && (
+        <div className={`notebook-search ${activeQuery ? "has-query" : ""}`}>
+          <Search size={16} aria-hidden="true" />
+          <input
+            type="search"
+            value={query}
+            aria-label="搜索笔记"
+            placeholder="搜索标题、正文或来源事项……"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {activeQuery && (
+            <>
+              <span>{filteredNotes.length} 条</span>
+              <button type="button" onClick={() => setQuery("")} aria-label="清空搜索">
+                <X size={14} />
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {filteredNotes.length ? (
         <div className="notebook-list">
-          {notes.map((note) => (
-            <NotebookCard key={note.id} note={note} onChange={onChange} />
+          {filteredNotes.map((note) => (
+            <NotebookCard key={note.id} note={note} query={activeQuery} onChange={onChange} />
           ))}
         </div>
+      ) : notes.length ? (
+        <div className="empty-state compact notebook-search-empty">
+          <Search size={23} />
+          <h2>没有找到相关笔记</h2>
+          <p>换一个关键词，或清空搜索查看全部内容。</p>
+          <button className="text-button" onClick={() => setQuery("")}>清空搜索</button>
+        </div>
       ) : (
-        <div className="empty-state compact">
+        !creating && <div className="empty-state compact">
           <BookOpen size={23} />
           <h2>笔记本还是空的</h2>
-          <p>在 AI 建议便笺里选择“复制到笔记本”，内容就会来到这里。</p>
+          <p>新建一条自己的笔记，或从 AI 建议便笺复制内容到这里。</p>
+          <button className="primary-small" onClick={() => setCreating(true)}>
+            <Plus size={14} /> 写第一条笔记
+          </button>
         </div>
       )}
     </section>

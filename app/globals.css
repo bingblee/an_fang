@@ -1297,7 +1297,9 @@ a:focus-visible {
 .edit-title,
 .date-field input,
 .notebook-editor input,
-.notebook-editor textarea {
+.notebook-editor textarea,
+.notebook-create input,
+.notebook-create textarea {
   border: 1px solid var(--line-strong);
   border-radius: 4px;
   outline: none;
@@ -1311,7 +1313,8 @@ a:focus-visible {
 .title-edit-card label { display: grid; gap: 10px; font-size: 12px; color: var(--text-soft); }
 .title-edit-hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
 .edit-title:focus, .date-field input:focus,
-.notebook-editor input:focus, .notebook-editor textarea:focus { border-color: var(--signal); }
+.notebook-editor input:focus, .notebook-editor textarea:focus,
+.notebook-create input:focus, .notebook-create textarea:focus { border-color: var(--signal); }
 
 .date-field {
   margin-top: 13px;
@@ -1515,7 +1518,169 @@ a:focus-visible {
 }
 
 .later-heading h1 { font-size: clamp(42px, 5vw, 66px); }
-.notebook-heading { margin-bottom: 34px; }
+.notebook-heading {
+  margin-bottom: 28px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.notebook-heading-copy { min-width: 0; }
+
+.notebook-heading-copy > p:last-child {
+  max-width: 600px;
+  margin: 18px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.notebook-heading > .primary-small {
+  flex: 0 0 auto;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notebook-create {
+  position: relative;
+  margin: 0 0 22px;
+  padding: 21px 22px 18px;
+  display: grid;
+  gap: 16px;
+  overflow: hidden;
+  border: 1px solid var(--signal-border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  animation: reveal 190ms ease both;
+}
+
+.notebook-create::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--signal);
+}
+
+.notebook-create.is-busy { opacity: 0.62; pointer-events: none; }
+
+.notebook-create-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.notebook-create-heading span,
+.notebook-create label > span {
+  color: var(--signal);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.notebook-create-heading h2 {
+  margin: 7px 0 0;
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+}
+
+.notebook-create-heading small { color: var(--muted); font-size: 10px; }
+.notebook-create label { display: grid; gap: 7px; }
+
+.notebook-create input,
+.notebook-create textarea {
+  width: 100%;
+  padding: 11px 12px;
+  font-family: "Avenir Next", "PingFang SC", sans-serif;
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.notebook-create textarea { min-height: 158px; resize: vertical; }
+
+.notebook-create-footer {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.notebook-create-footer > span {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
+.notebook-create-footer > div { display: flex; align-items: center; gap: 12px; }
+.notebook-create-footer .primary-small { display: inline-flex; align-items: center; gap: 6px; }
+.notebook-create-footer .primary-small span { font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; opacity: 0.72; }
+
+.notebook-search {
+  min-height: 50px;
+  margin: 0 0 16px;
+  padding: 0 12px 0 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-raised);
+  color: var(--muted);
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.notebook-search:focus-within {
+  border-color: var(--signal-border);
+  background: var(--panel);
+  box-shadow: 0 0 0 3px var(--signal-wash);
+}
+
+.notebook-search > svg { flex: 0 0 auto; color: var(--signal); }
+
+.notebook-search input {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 13px 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.notebook-search input::placeholder { color: var(--faint); }
+.notebook-search input::-webkit-search-cancel-button { display: none; }
+
+.notebook-search > span {
+  flex: 0 0 auto;
+  color: var(--signal);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
+.notebook-search > button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.notebook-search > button:hover { background: var(--hover); color: var(--text); }
 .notebook-list { display: grid; gap: 9px; }
 
 .notebook-card {
@@ -1564,6 +1729,13 @@ a:focus-visible {
   line-height: 1.55;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.notebook-search-mark {
+  border-radius: 2px;
+  background: var(--signal-wash);
+  color: inherit;
+  box-shadow: inset 0 -1px 0 var(--signal);
 }
 
 .notebook-card-heading > svg { flex: 0 0 auto; color: var(--muted); transition: transform 160ms ease; }
@@ -1623,6 +1795,9 @@ a:focus-visible {
 
 .notebook-editor textarea { min-height: 190px; resize: vertical; }
 .notebook-edit-actions { display: flex; align-items: center; gap: 12px; }
+.notebook-search-empty { margin-top: 24px; }
+.notebook-search-empty .text-button { margin-top: 2px; }
+.empty-state .primary-small { margin-top: 7px; display: inline-flex; align-items: center; gap: 6px; }
 
 .daily-footer {
   margin-top: 80px;
@@ -1768,6 +1943,14 @@ a:focus-visible {
   .today-tab-panel .task-section { margin-top: 25px; }
   .later-page, .notebook-page { padding-top: 13px; }
   .later-heading { margin-bottom: 38px; padding-bottom: 29px; }
+  .notebook-heading { gap: 18px; }
+  .notebook-heading-copy > p:last-child { margin-top: 14px; font-size: 12px; }
+  .notebook-heading > .primary-small { margin-top: 1px; padding-right: 10px; padding-left: 10px; }
+  .notebook-create { padding: 18px 16px 16px 18px; }
+  .notebook-create-heading { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .notebook-create input, .notebook-create textarea, .notebook-search input { font-size: 16px; }
+  .notebook-create-footer { align-items: flex-start; flex-direction: column; }
+  .notebook-create-footer > div { width: 100%; justify-content: flex-end; }
   .task-section { margin-top: 40px; }
   .section-heading { align-items: center; }
   .section-heading > p { display: none; }
