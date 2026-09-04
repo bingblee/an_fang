@@ -171,14 +171,17 @@ body {
 }
 
 .auth-brand { position: relative; z-index: 1; }
-.auth-intro .auth-brand { color: #20332b; }
+.auth-intro .auth-brand {
+  color: #f6f3ea;
+  text-shadow: 0 1px 18px rgba(3, 13, 10, 0.42);
+}
 .auth-brand .brand-stamp {
   border-color: rgba(244, 241, 231, 0.72);
   background: rgba(244, 241, 231, 0.9);
   color: #24382e;
   box-shadow: 0 8px 26px rgba(3, 12, 9, 0.22);
 }
-.auth-brand .brand-copy small { color: rgba(32, 51, 43, 0.65); }
+.auth-brand .brand-copy small { color: rgba(246, 243, 234, 0.68); }
 .auth-intro-copy { max-width: 375px; margin: auto 0; padding: 72px 0; }
 .auth-intro-copy h1 {
   max-width: 330px;
