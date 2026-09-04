@@ -816,14 +816,11 @@ a:focus-visible {
 
 .later-page,
 .notebook-page {
-  max-width: 940px;
+  max-width: 1080px;
   padding-top: 42px;
 }
 
-.notebook-page {
-  max-width: 1080px;
-  padding-top: 32px;
-}
+.notebook-page { padding-top: 32px; }
 
 .task-section {
   margin-top: 48px;
