@@ -69,6 +69,9 @@ test("single-owner authentication protects pages, APIs, sessions, and password c
     assert.equal(new URL(privatePage.headers.get("location"), baseUrl).pathname, "/login");
     const missingAttachment = await json("/api/attachments/missing");
     assert.equal(missingAttachment.response.status, 401);
+    const loginArtwork = await fetch(`${baseUrl}/auth-sanctuary.jpg`);
+    assert.equal(loginArtwork.status, 200);
+    assert.equal(loginArtwork.headers.get("content-type"), "image/jpeg");
 
     const state = await json("/api/auth/state");
     assert.deepEqual(state.body, {

@@ -102,8 +102,7 @@ body {
   display: grid;
   place-items: center;
   background:
-    radial-gradient(circle at 16% 14%, var(--signal-wash), transparent 28rem),
-    linear-gradient(135deg, transparent 0 48%, color-mix(in srgb, var(--line) 45%, transparent) 48% 48.15%, transparent 48.15%),
+    radial-gradient(circle at 15% 12%, var(--signal-wash), transparent 31rem),
     var(--canvas);
 }
 
@@ -141,19 +140,26 @@ body {
 
 .auth-intro {
   position: relative;
+  isolation: isolate;
   padding: 42px 48px 38px;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line);
   background:
-    linear-gradient(var(--line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line) 1px, transparent 1px),
-    var(--panel-raised);
-  background-size: 46px 46px, 46px 46px, auto;
-  background-position: -1px -1px;
+    linear-gradient(180deg, rgba(8, 20, 16, 0.08) 0%, rgba(8, 20, 16, 0.03) 45%, rgba(5, 15, 12, 0.34) 100%),
+    linear-gradient(90deg, rgba(6, 19, 14, 0.1), transparent 68%),
+    url("/auth-sanctuary.jpg") 56% center / cover no-repeat;
 }
 
 .auth-brand { position: relative; z-index: 1; }
+.auth-intro .auth-brand { color: #20332b; }
+.auth-brand .brand-stamp {
+  border-color: rgba(244, 241, 231, 0.72);
+  background: rgba(244, 241, 231, 0.9);
+  color: #24382e;
+  box-shadow: 0 8px 26px rgba(3, 12, 9, 0.22);
+}
+.auth-brand .brand-copy small { color: rgba(32, 51, 43, 0.65); }
 .auth-intro-copy { max-width: 375px; margin: auto 0; padding: 72px 0; }
 .auth-intro-copy h1 {
   max-width: 330px;
@@ -163,6 +169,8 @@ body {
   font-weight: 620;
   line-height: 1.2;
   letter-spacing: -0.035em;
+  color: #f6f3ea;
+  text-shadow: 0 2px 28px rgba(3, 13, 10, 0.48);
 }
 
 .auth-form {
@@ -2385,6 +2393,7 @@ a:focus-visible {
   .auth-threshold { min-height: 0; grid-template-columns: 1fr; }
   .auth-threshold::before, .auth-threshold::after { display: none; }
   .auth-intro { padding: 25px 24px 22px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .auth-intro { min-height: 260px; background-position: center 62%; }
   .auth-intro-copy { margin: 42px 0 28px; padding: 0; }
   .auth-intro-copy h1 { max-width: 290px; font-size: 32px; }
   .auth-form { padding: 29px 24px 31px; }

@@ -9,7 +9,8 @@ const publicPaths = new Set([
   "/sw.js",
   "/icon.svg",
   "/icon-192.png",
-  "/icon-512.png"
+  "/icon-512.png",
+  "/auth-sanctuary.jpg"
 ]);
 
 export function proxy(request: NextRequest) {
