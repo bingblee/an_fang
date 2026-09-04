@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -62,20 +62,14 @@ export function AuthGateway({
             <span className="brand-copy"><strong>安放</strong><small>LIFE NAVIGATOR</small></span>
           </a>
           <div className="auth-intro-copy">
-            <p className="auth-kicker">PRIVATE SPACE / 私人空间</p>
             <h1 id="auth-title">{setup ? "先把这扇门交给你" : recovery ? "重新拿回这把钥匙" : "回到你的安放之处"}</h1>
-            <p>{setup ? "创建唯一的主人账号。之后，事项、笔记与生活线索只在登录后出现。" : recovery ? "使用服务器上的首次设置口令，为主人账号换一个新密码。" : "你留下的每件小事，都还安静地待在原处。"}</p>
-          </div>
-          <div className="auth-privacy-note">
-            <ShieldCheck size={17} />
-            <span>密码不会被原文保存；登录凭证仅存于这台浏览器的安全 Cookie。</span>
           </div>
         </div>
 
         <form className="auth-form" onSubmit={submit}>
           <div className="auth-form-heading">
             <span className="auth-key-mark"><KeyRound size={18} /></span>
-            <div><strong>{setup ? "首次设置" : recovery ? "重置密码" : "主人登录"}</strong><small>{setup ? "只需要完成一次" : recovery ? "撤销原有登录" : "仅你可进入"}</small></div>
+            <strong>{setup ? "首次设置" : recovery ? "重置密码" : "主人登录"}</strong>
           </div>
 
           {!setupConfigured && (
@@ -90,7 +84,6 @@ export function AuthGateway({
               <input value={setupToken} onChange={(event) => setSetupToken(event.target.value)}
                 autoComplete="one-time-code" required disabled={!setupConfigured || submitting}
                 placeholder="由服务器配置提供" autoFocus />
-              <small>{recovery ? "由服务器管理员临时重新配置，用完即可移除。" : "它只用于确认第一次建号，不是以后登录的密码。"}</small>
             </label>
           )}
 
@@ -128,7 +121,7 @@ export function AuthGateway({
 
           <label className="remember-choice">
             <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
-            <span><strong>记住登录</strong><small>在这台设备上保持 30 天</small></span>
+            <strong>记住登录 30 天</strong>
           </label>
 
           {error && <p className="auth-error" role="alert">{error}</p>}
@@ -137,7 +130,7 @@ export function AuthGateway({
             {submitting ? <LoaderCircle className="spin" size={17} /> : <LockKeyhole size={17} />}
             {submitting ? "正在确认……" : setup ? "创建并进入" : recovery ? "重置并进入" : "进入安放"}
           </button>
-          {!needsToken && <p className="auth-recovery"><a href="/recover">忘记密码</a><span> · 使用服务器设置口令重置</span></p>}
+          {!needsToken && <p className="auth-recovery"><a href="/recover">忘记密码</a></p>}
           {recovery && <p className="auth-recovery"><a href="/login">返回登录</a></p>}
         </form>
       </section>

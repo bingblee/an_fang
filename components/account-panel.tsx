@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Eye, EyeOff, LoaderCircle, LogOut, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, LoaderCircle, LogOut } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -84,9 +84,8 @@ export function AccountPanel({ username }: { username: string }) {
           <span className="account-monogram">{username.slice(0, 1).toLocaleUpperCase("zh-CN")}</span>
           <div><p>主人账号</p><h1>{username}</h1></div>
         </div>
-        <div className="account-security-note"><ShieldCheck size={17} /><span>修改密码后，其他设备上的登录会立即失效。</span></div>
         <form className="account-form" onSubmit={change}>
-          <div className="account-section-heading"><strong>修改密码</strong><span>使用一个只有你知道的新密码</span></div>
+          <div className="account-section-heading"><strong>修改密码</strong></div>
           <label className="auth-field"><span>当前密码</span><input type={showPassword ? "text" : "password"}
             value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)}
             autoComplete="current-password" required disabled={submitting} /></label>
@@ -108,7 +107,7 @@ export function AccountPanel({ username }: { username: string }) {
           </button>
         </form>
         <div className="account-exit">
-          <div><strong>结束当前登录</strong><span>这台设备需要重新输入密码才能进入。</span>
+          <div><strong>结束当前登录</strong>
             {logoutError && <span className="account-exit-error" role="alert">{logoutError}</span>}
           </div>
           <button type="button" onClick={() => void logout()} disabled={loggingOut}>

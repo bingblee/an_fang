@@ -155,15 +155,6 @@ body {
 
 .auth-brand { position: relative; z-index: 1; }
 .auth-intro-copy { max-width: 375px; margin: auto 0; padding: 72px 0; }
-.auth-kicker {
-  margin: 0 0 17px;
-  color: var(--signal);
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.18em;
-}
-
 .auth-intro-copy h1 {
   max-width: 330px;
   margin: 0;
@@ -173,24 +164,6 @@ body {
   line-height: 1.2;
   letter-spacing: -0.035em;
 }
-
-.auth-intro-copy > p:last-child {
-  max-width: 330px;
-  margin: 24px 0 0;
-  color: var(--text-soft);
-  font-size: 13px;
-  line-height: 1.85;
-}
-
-.auth-privacy-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.65;
-}
-.auth-privacy-note svg { flex: 0 0 auto; color: var(--signal); }
 
 .auth-form {
   align-self: center;
@@ -209,12 +182,9 @@ body {
   background: var(--signal-wash);
   color: var(--signal);
 }
-.auth-form-heading > div { display: grid; gap: 3px; }
 .auth-form-heading strong { font-family: "Songti SC", "STSong", serif; font-size: 18px; }
-.auth-form-heading small { color: var(--muted); font-size: 10px; }
 .auth-field { display: grid; gap: 8px; }
 .auth-field > span { color: var(--text-soft); font-size: 11px; font-weight: 650; letter-spacing: 0.04em; }
-.auth-field > small { margin-top: -3px; color: var(--faint); font-size: 9px; line-height: 1.55; }
 .auth-field input {
   width: 100%;
   height: 45px;
@@ -248,9 +218,7 @@ body {
 .password-input button:hover { background: var(--hover); color: var(--text); }
 .remember-choice { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .remember-choice input { width: 16px; height: 16px; margin: 0; accent-color: var(--signal); }
-.remember-choice > span { display: grid; gap: 2px; }
 .remember-choice strong { color: var(--text-soft); font-size: 11px; }
-.remember-choice small { color: var(--faint); font-size: 9px; }
 .auth-submit {
   min-height: 45px;
   padding: 0 18px;
@@ -293,12 +261,9 @@ body {
 .account-monogram { width: 54px; height: 54px; display: grid; place-items: center; border: 1px solid var(--signal); border-radius: 50%; background: var(--signal-wash); color: var(--signal); font-family: "Songti SC", "STSong", serif; font-size: 24px; }
 .account-identity p { margin: 0 0 4px; color: var(--muted); font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; letter-spacing: 0.14em; }
 .account-identity h1 { margin: 0; font-family: "Songti SC", "STSong", serif; font-size: 31px; font-weight: 620; }
-.account-security-note { margin: 24px 0 0; padding: 12px 14px; display: flex; align-items: center; gap: 9px; border: 1px solid var(--signal-border); border-radius: 5px; background: var(--signal-wash); color: var(--text-soft); font-size: 10px; }
-.account-security-note svg { color: var(--signal); }
 .account-form { padding: 35px 0 42px; display: grid; gap: 19px; border-bottom: 1px solid var(--line); }
 .account-section-heading { margin-bottom: 5px; display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
 .account-section-heading strong { font-family: "Songti SC", "STSong", serif; font-size: 18px; }
-.account-section-heading span { color: var(--faint); font-size: 10px; }
 .account-save { justify-self: end; min-width: 124px; }
 .account-message:not(.error) { border-left-color: var(--signal); background: var(--signal-wash); color: var(--signal); }
 .account-exit { padding: 28px 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
@@ -2422,8 +2387,6 @@ a:focus-visible {
   .auth-intro { padding: 25px 24px 22px; border-right: 0; border-bottom: 1px solid var(--line); }
   .auth-intro-copy { margin: 42px 0 28px; padding: 0; }
   .auth-intro-copy h1 { max-width: 290px; font-size: 32px; }
-  .auth-intro-copy > p:last-child { margin-top: 16px; }
-  .auth-privacy-note { display: none; }
   .auth-form { padding: 29px 24px 31px; }
   .auth-field input { font-size: 16px; }
   .account-page { padding: 20px 18px 50px; }
