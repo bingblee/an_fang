@@ -14,6 +14,7 @@ type EnrichmentKind = ItemEnrichment["kind"];
 
 type EnrichmentInput = {
   db: DatabaseSync;
+  userId: string;
   itemId: string;
   captureId?: string | null;
   request?: string | null;
@@ -153,9 +154,10 @@ export async function createItemEnrichment(input: EnrichmentInput) {
         .prepare(
           `SELECT id FROM item_enrichments
            WHERE item_id = ? AND status = 'ready'
+             AND EXISTS (SELECT 1 FROM items WHERE id = item_enrichments.item_id AND user_id = ?)
            ORDER BY created_at DESC LIMIT 1`
         )
-        .get(input.itemId) as { id: string } | undefined)
+        .get(input.itemId, input.userId) as { id: string } | undefined)
     : undefined;
   if (existing) {
     return { created: false, provider: null, error: null };
@@ -164,9 +166,9 @@ export async function createItemEnrichment(input: EnrichmentInput) {
   const item = input.db
     .prepare(
       `SELECT title, notes, category, scheduled_for, time_window, source_excerpt
-       FROM items WHERE id = ?`
+       FROM items WHERE id = ? AND user_id = ?`
     )
-    .get(input.itemId) as ItemContext | undefined;
+    .get(input.itemId, input.userId) as ItemContext | undefined;
   if (!item) throw new Error("没有找到需要建议的事项");
 
   const request = (input.request || defaultRequest(item)).trim().slice(0, 500);

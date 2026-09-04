@@ -11,6 +11,81 @@ declare global {
   var __anfangDb: DatabaseSync | undefined;
 }
 
+type TableColumn = { name: string };
+
+function tableColumns(db: DatabaseSync, table: string) {
+  return new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as TableColumn[])
+      .map((column) => column.name)
+  );
+}
+
+function ensureUserColumn(db: DatabaseSync, table: string) {
+  if (!tableColumns(db, table).has("user_id")) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN user_id TEXT REFERENCES auth_users(id) ON DELETE CASCADE`);
+  }
+}
+
+function migrateTopicsForUsers(db: DatabaseSync, legacyOwnerId: string | null) {
+  const columns = tableColumns(db, "topics");
+  const schema = (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'topics'")
+    .get() as { sql?: string } | undefined)?.sql || "";
+  const hasScopedName = /UNIQUE\s*\(\s*user_id\s*,\s*name_key\s*\)/i.test(schema);
+  if (columns.has("user_id") && hasScopedName) return;
+
+  db.exec("PRAGMA foreign_keys = OFF");
+  let transactionOpen = false;
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    transactionOpen = true;
+    db.exec("DROP TABLE IF EXISTS topics_user_migration");
+    db.exec(`CREATE TABLE topics_user_migration (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES auth_users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      name_key TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (user_id, name_key)
+    )`);
+    if (columns.has("user_id")) {
+      db.prepare(`INSERT INTO topics_user_migration
+        (id, user_id, name, name_key, description, created_at, updated_at)
+        SELECT id, COALESCE(user_id, ?), name, name_key, description, created_at, updated_at
+        FROM topics`).run(legacyOwnerId);
+    } else {
+      db.prepare(`INSERT INTO topics_user_migration
+        (id, user_id, name, name_key, description, created_at, updated_at)
+        SELECT id, ?, name, name_key, description, created_at, updated_at
+        FROM topics`).run(legacyOwnerId);
+    }
+    db.exec("DROP TABLE topics");
+    db.exec("ALTER TABLE topics_user_migration RENAME TO topics");
+    db.exec("COMMIT");
+    transactionOpen = false;
+  } catch (error) {
+    if (transactionOpen) db.exec("ROLLBACK");
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
+export function claimLegacyData(db: DatabaseSync, userId: string) {
+  for (const table of [
+    "captures",
+    "topics",
+    "items",
+    "notebook_notes",
+    "feedback",
+    "context_facts",
+    "push_subscriptions"
+  ]) {
+    db.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id IS NULL`).run(userId);
+  }
+}
+
 function initialize(db: DatabaseSync) {
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -18,6 +93,7 @@ function initialize(db: DatabaseSync) {
 
     CREATE TABLE IF NOT EXISTS captures (
       id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES auth_users(id) ON DELETE CASCADE,
       kind TEXT NOT NULL,
       original_text TEXT,
       source_url TEXT,
@@ -51,15 +127,18 @@ function initialize(db: DatabaseSync) {
 
     CREATE TABLE IF NOT EXISTS topics (
       id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES auth_users(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
-      name_key TEXT NOT NULL UNIQUE,
+      name_key TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      UNIQUE (user_id, name_key)
     );
 
     CREATE TABLE IF NOT EXISTS items (
       id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES auth_users(id) ON DELETE CASCADE,
       capture_id TEXT NOT NULL REFERENCES captures(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
       notes TEXT,
@@ -121,6 +200,7 @@ function initialize(db: DatabaseSync) {
 
     CREATE TABLE IF NOT EXISTS notebook_notes (
       id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES auth_users(id) ON DELETE CASCADE,
       source_item_id TEXT REFERENCES items(id) ON DELETE SET NULL,
       source_enrichment_id TEXT,
       title TEXT NOT NULL,
@@ -160,6 +240,7 @@ function initialize(db: DatabaseSync) {
 
     CREATE TABLE IF NOT EXISTS feedback (
       id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES auth_users(id) ON DELETE CASCADE,
       item_id TEXT REFERENCES items(id) ON DELETE SET NULL,
       kind TEXT NOT NULL,
       original_value TEXT,
@@ -170,6 +251,7 @@ function initialize(db: DatabaseSync) {
 
     CREATE TABLE IF NOT EXISTS context_facts (
       id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES auth_users(id) ON DELETE CASCADE,
       fact_type TEXT NOT NULL,
       content TEXT NOT NULL,
       source TEXT NOT NULL,
@@ -184,6 +266,7 @@ function initialize(db: DatabaseSync) {
 
     CREATE TABLE IF NOT EXISTS push_subscriptions (
       id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES auth_users(id) ON DELETE CASCADE,
       endpoint TEXT NOT NULL UNIQUE,
       p256dh TEXT NOT NULL,
       auth TEXT NOT NULL,
@@ -222,6 +305,20 @@ function initialize(db: DatabaseSync) {
       updated_at TEXT NOT NULL
     );
   `);
+
+  const legacyOwner = db.prepare(
+    "SELECT id FROM auth_users ORDER BY created_at ASC, id ASC LIMIT 1"
+  ).get() as { id: string } | undefined;
+  migrateTopicsForUsers(db, legacyOwner?.id || null);
+  for (const table of [
+    "captures",
+    "items",
+    "notebook_notes",
+    "feedback",
+    "context_facts",
+    "push_subscriptions"
+  ]) ensureUserColumn(db, table);
+  if (legacyOwner) claimLegacyData(db, legacyOwner.id);
 
   const itemColumns = db.prepare("PRAGMA table_info(items)").all() as Array<{
     name: string;
@@ -266,6 +363,12 @@ function initialize(db: DatabaseSync) {
   db.exec("CREATE INDEX IF NOT EXISTS idx_items_topic_status ON items(topic_id, status)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_items_category_status ON items(category, status)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_items_review_at ON items(status, review_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_captures_user_created ON captures(user_id, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_topics_user_created ON topics(user_id, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_items_user_status ON items(user_id, status, scheduled_for)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_notebook_user_created ON notebook_notes(user_id, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_context_facts_user ON context_facts(user_id, fact_type)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)");
   db.exec(`
     INSERT OR IGNORE INTO item_sources (item_id, capture_id, relation, created_at)
     SELECT id, capture_id, 'primary', created_at FROM items;
@@ -375,7 +478,7 @@ export const itemSelect = `
          a.mime_type,
          a.original_name
   FROM items i
-  LEFT JOIN topics topic ON topic.id = i.topic_id
+  LEFT JOIN topics topic ON topic.id = i.topic_id AND topic.user_id = i.user_id
   LEFT JOIN item_enrichments enrichment ON enrichment.id = (
     SELECT latest_enrichment.id
     FROM item_enrichments latest_enrichment
@@ -389,6 +492,9 @@ export const itemSelect = `
     FROM item_sources source_link
     JOIN attachments source_attachment
       ON source_attachment.capture_id = source_link.capture_id
+    JOIN captures source_capture
+      ON source_capture.id = source_attachment.capture_id
+     AND source_capture.user_id = i.user_id
     WHERE source_link.item_id = i.id
     ORDER BY source_attachment.created_at DESC
     LIMIT 1

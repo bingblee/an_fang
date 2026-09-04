@@ -33,8 +33,9 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
+  const { userId } = auth.session;
   const { id } = await context.params;
   const parsed = actionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
@@ -42,7 +43,7 @@ export async function PATCH(
   }
 
   const db = getDb();
-  const existing = db.prepare("SELECT * FROM items WHERE id = ?").get(id) as
+  const existing = db.prepare("SELECT * FROM items WHERE id = ? AND user_id = ?").get(id, userId) as
     | Record<string, string | number | null>
     | undefined;
   if (!existing) {
@@ -62,7 +63,7 @@ export async function PATCH(
     db.prepare("UPDATE items SET category = ?, category_manual = 1, updated_at = ? WHERE id = ?")
       .run(action.category, now, id);
   } else if (action.action === "set_topic") {
-    if (action.topicId && !db.prepare("SELECT id FROM topics WHERE id = ?").get(action.topicId)) {
+    if (action.topicId && !db.prepare("SELECT id FROM topics WHERE id = ? AND user_id = ?").get(action.topicId, userId)) {
       return NextResponse.json({ error: "话题不存在，请刷新后重试。" }, { status: 404 });
     }
     db.prepare("UPDATE items SET topic_id = ?, topic_source = 'manual', updated_at = ? WHERE id = ?")
@@ -179,10 +180,11 @@ export async function PATCH(
 
   db.prepare(
     `INSERT INTO feedback
-      (id, item_id, kind, original_value, corrected_value, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
+      (id, user_id, item_id, kind, original_value, corrected_value, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
     randomUUID(),
+    userId,
     id,
     action.action,
     action.action === "rename" ? String(existing.title) : action.action === "set_category" ? String(existing.category) :
@@ -191,7 +193,7 @@ export async function PATCH(
     now
   );
 
-  const row = db.prepare(`${itemSelect} WHERE i.id = ?`).get(id) as Record<
+  const row = db.prepare(`${itemSelect} WHERE i.id = ? AND i.user_id = ?`).get(id, userId) as Record<
     string,
     string | number | null
   >;

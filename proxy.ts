@@ -3,6 +3,7 @@ import { sessionCookieName } from "@/lib/auth";
 
 const publicPaths = new Set([
   "/login",
+  "/register",
   "/setup",
   "/recover",
   "/manifest.webmanifest",

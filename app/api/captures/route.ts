@@ -73,8 +73,9 @@ function addTrigger(
 }
 
 export async function POST(request: NextRequest) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
+  const { userId } = auth.session;
   const formData = await request.formData().catch(() => null);
   if (!formData) return NextResponse.json({ error: "无法读取提交的内容。" }, { status: 400 });
   const text = String(formData.get("text") || "").trim();
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest) {
 
   const db = getDb();
   if (topicChoice !== "auto" && topicChoice !== "none" &&
-      !db.prepare("SELECT id FROM topics WHERE id = ?").get(topicChoice)) {
+      !db.prepare("SELECT id FROM topics WHERE id = ? AND user_id = ?").get(topicChoice, userId)) {
     return NextResponse.json({ error: "这个话题不存在，请重新选择。" }, { status: 404 });
   }
   const captureId = randomUUID();
@@ -110,9 +111,9 @@ export async function POST(request: NextRequest) {
 
   db.prepare(
     `INSERT INTO captures
-      (id, kind, original_text, source_url, status, created_at)
-     VALUES (?, ?, ?, ?, 'processing', ?)`
-  ).run(captureId, kind, text || null, sourceUrl, createdAt);
+      (id, user_id, kind, original_text, source_url, status, created_at)
+     VALUES (?, ?, ?, ?, ?, 'processing', ?)`
+  ).run(captureId, userId, kind, text || null, sourceUrl, createdAt);
 
   let attachmentRecord:
     | { id: string; mimeType: string; originalName: string; base64: string }
@@ -124,7 +125,7 @@ export async function POST(request: NextRequest) {
   try {
     const command = parseTopicCommand(text);
     if (command) {
-      const result = createTopic(db, { name: command.name, description: "" });
+      const result = createTopic(db, userId, { name: command.name, description: "" });
       createdTopic = result.topic;
       processingText = command.remainingText;
       if (topicChoice === "auto") topicChoice = createdTopic.id;
@@ -171,9 +172,9 @@ export async function POST(request: NextRequest) {
       };
     }
 
-    const topics = listTopics(db);
+    const topics = listTopics(db, userId);
     const context = topicContext(topics, processingText, topicChoice);
-    const candidates = findMergeCandidates(db, processingText, Boolean(attachmentRecord), topicChoice);
+    const candidates = findMergeCandidates(db, userId, processingText, Boolean(attachmentRecord), topicChoice);
     const extraction = await extractCapture(
       processingText,
       attachmentRecord
@@ -234,9 +235,10 @@ export async function POST(request: NextRequest) {
         ? (db
             .prepare(
               `SELECT * FROM items
-               WHERE id = ? AND status IN ('scheduled', 'doing', 'waiting', 'later')`
+               WHERE id = ? AND user_id = ?
+                 AND status IN ('scheduled', 'doing', 'waiting', 'later')`
             )
-            .get(extraction.mergeTargetId) as Record<string, string | number | null> | undefined)
+            .get(extraction.mergeTargetId, userId) as Record<string, string | number | null> | undefined)
         : undefined;
 
     if (existingTarget && !canMergeIntoTopic(
@@ -343,14 +345,15 @@ export async function POST(request: NextRequest) {
     } else {
       db.prepare(
         `INSERT INTO items
-          (id, capture_id, title, notes, category, status, priority,
+          (id, user_id, capture_id, title, notes, category, status, priority,
            duration_minutes, energy, person, context_label, scheduled_for,
            review_at, review_interval_days,
            time_window, source_excerpt, extraction_source, confidence,
            needs_confirmation, confirmation_question, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         itemId,
+        userId,
         captureId,
         extracted.title,
         extracted.notes,
@@ -386,7 +389,7 @@ export async function POST(request: NextRequest) {
 
     if (existingTarget && extraction.operation === "enrich") {
       const enrichment = await createItemEnrichment({
-        db, itemId: resultItemId, captureId,
+        db, userId, itemId: resultItemId, captureId,
         request: extraction.enrichmentRequest || processingText,
         kind: "requested"
       });
@@ -401,6 +404,7 @@ export async function POST(request: NextRequest) {
     ) {
       const enrichment = await createItemEnrichment({
         db,
+        userId,
         itemId: resultItemId,
         captureId,
         request: extraction.enrichmentRequest,
@@ -416,7 +420,7 @@ export async function POST(request: NextRequest) {
       "UPDATE captures SET status = 'processed', processed_at = ? WHERE id = ?"
     ).run(new Date().toISOString(), captureId);
 
-    const row = db.prepare(`${itemSelect} WHERE i.id = ?`).get(resultItemId) as Record<
+    const row = db.prepare(`${itemSelect} WHERE i.id = ? AND i.user_id = ?`).get(resultItemId, userId) as Record<
       string,
       string | number | null
     >;

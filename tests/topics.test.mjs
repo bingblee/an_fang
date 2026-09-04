@@ -19,6 +19,7 @@ let reply = { title: "测试事项" };
 let modelFails = false;
 const prompts = [];
 const legacyId = randomUUID();
+const legacyTopicId = randomUUID();
 let topicA, topicB, taskA;
 
 const listen = async (server) => {
@@ -61,21 +62,27 @@ before(async () => {
   dataDir = await mkdtemp(join(tmpdir(), "anfang-topics-test-"));
   ensureDataDirectory(getRuntimeConfig({ ANFANG_ENV: "test", TEST_DATA_DIR: dataDir }));
   const oldDb = new DatabaseSync(join(dataDir, "app.db"));
-  // The pre-topic schema intentionally lacks topics, topic_id, topic_source, and merged_into_id.
+  // This mirrors the latest single-user schema: topic names are globally unique and
+  // business rows do not have user ownership yet.
   oldDb.exec(`
     CREATE TABLE captures (id TEXT PRIMARY KEY, kind TEXT NOT NULL, original_text TEXT, source_url TEXT,
       status TEXT NOT NULL, created_at TEXT NOT NULL, processed_at TEXT);
+    CREATE TABLE topics (id TEXT PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE items (id TEXT PRIMARY KEY, capture_id TEXT NOT NULL REFERENCES captures(id), title TEXT NOT NULL,
       notes TEXT, category TEXT NOT NULL, status TEXT NOT NULL, priority TEXT NOT NULL, duration_minutes INTEGER,
       energy TEXT NOT NULL, person TEXT, context_label TEXT, scheduled_for TEXT, time_window TEXT, source_excerpt TEXT,
       extraction_source TEXT NOT NULL, confidence REAL NOT NULL, needs_confirmation INTEGER NOT NULL DEFAULT 0,
-      confirmation_question TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT);
+      confirmation_question TEXT, topic_id TEXT REFERENCES topics(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      completed_at TEXT);
   `);
   const now = new Date().toISOString();
   const captureId = randomUUID();
+  oldDb.prepare("INSERT INTO topics VALUES (?, '旧话题', '旧话题', '迁移前的话题', ?, ?)")
+    .run(legacyTopicId, now, now);
   oldDb.prepare("INSERT INTO captures VALUES (?, 'text', '原有事项，不要丢失', NULL, 'processed', ?, ?)").run(captureId, now, now);
-  oldDb.prepare(`INSERT INTO items (id, capture_id, title, category, status, priority, energy, extraction_source, confidence, created_at, updated_at)
-    VALUES (?, ?, '原有事项，不要丢失', 'life', 'later', 'normal', 'low', 'local', 0.7, ?, ?)`).run(legacyId, captureId, now, now);
+  oldDb.prepare(`INSERT INTO items (id, capture_id, title, category, status, priority, energy, extraction_source, confidence, topic_id, created_at, updated_at)
+    VALUES (?, ?, '原有事项，不要丢失', 'life', 'later', 'normal', 'low', 'local', 0.7, ?, ?, ?)`).run(legacyId, captureId, legacyTopicId, now, now);
   oldDb.close();
 
   mock = createServer(async (request, response) => {
@@ -130,16 +137,24 @@ after(async () => {
 test("legacy database adds a review cycle without altering existing task content", async () => {
   const result = await api("/api/dashboard");
   assert.equal(result.status, 200);
-  assert.deepEqual(result.body.topics, []);
+  assert.equal(result.body.topics.length, 1);
+  assert.equal(result.body.topics[0].id, legacyTopicId);
+  assert.equal(result.body.topics[0].openCount, 1);
   assert.equal(result.body.totalOpen, 1);
   assert.equal(result.body.environment, "test");
   assert.equal(result.body.remindersEnabled, false);
   const legacyItem = [...result.body.review, ...result.body.later].find((item) => item.id === legacyId);
   assert.equal(legacyItem.id, legacyId);
-  assert.equal(legacyItem.topicId, null);
+  assert.equal(legacyItem.topicId, legacyTopicId);
   assert.equal(legacyItem.status, "later");
   assert.ok(legacyItem.reviewAt);
   assert.equal(itemRow(legacyId).title, "原有事项，不要丢失");
+  const ownerId = db.prepare("SELECT id FROM auth_users WHERE username_key = '测试主人'").get().id;
+  assert.equal(db.prepare("SELECT user_id FROM captures WHERE id = ?").get(legacyItem.captureId).user_id, ownerId);
+  assert.equal(itemRow(legacyId).user_id, ownerId);
+  assert.equal(db.prepare("SELECT user_id FROM topics WHERE id = ?").get(legacyTopicId).user_id, ownerId);
+  const topicSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'topics'").get().sql;
+  assert.match(topicSchema, /UNIQUE\s*\(\s*user_id\s*,\s*name_key\s*\)/i);
   assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
 });
 

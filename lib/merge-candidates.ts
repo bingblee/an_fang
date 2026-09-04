@@ -101,7 +101,13 @@ function scoreCandidate(input: string, row: CandidateRow) {
   return Math.min(1, semanticScore + continuation + recency);
 }
 
-export function findMergeCandidates(db: DatabaseSync, input: string, hasImage = false, topicChoice = "auto") {
+export function findMergeCandidates(
+  db: DatabaseSync,
+  userId: string,
+  input: string,
+  hasImage = false,
+  topicChoice = "auto"
+) {
   const explicitReference =
     /(?:怎么做|做法|方法|攻略|给.*建议|查找|查询|搜一下|清单|步骤|教程|备注在|附在|放到.*(?:事项|任务))/i.test(
       input
@@ -113,13 +119,14 @@ export function findMergeCandidates(db: DatabaseSync, input: string, hasImage = 
       `SELECT id, topic_id, title, notes, category, status, scheduled_for, time_window,
               person, context_label, source_excerpt, updated_at
        FROM items
-       WHERE status IN ('scheduled', 'doing', 'waiting', 'later')
+       WHERE user_id = ?
+         AND status IN ('scheduled', 'doing', 'waiting', 'later')
          AND updated_at >= ?
          AND (? = 'auto' OR (? = 'none' AND topic_id IS NULL) OR topic_id = ? OR (? NOT IN ('auto', 'none') AND topic_id IS NULL))
        ORDER BY updated_at DESC
        LIMIT ${explicitReference ? 80 : 30}`
     )
-    .all(cutoff, topicChoice, topicChoice, topicChoice, topicChoice) as unknown as CandidateRow[];
+    .all(userId, cutoff, topicChoice, topicChoice, topicChoice, topicChoice) as unknown as CandidateRow[];
 
   return rows
     .map((row) => ({

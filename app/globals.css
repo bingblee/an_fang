@@ -184,10 +184,10 @@ body {
 .auth-brand .brand-copy small { color: rgba(246, 243, 234, 0.68); }
 .auth-intro-copy { max-width: 375px; margin: auto 0; padding: 72px 0; }
 .auth-intro-copy h1 {
-  max-width: 330px;
+  max-width: 375px;
   margin: 0;
   font-family: "Songti SC", "STSong", serif;
-  font-size: clamp(34px, 4vw, 48px);
+  font-size: clamp(34px, 3.4vw, 44px);
   font-weight: 620;
   line-height: 1.2;
   letter-spacing: -0.035em;
@@ -280,6 +280,7 @@ body {
 .auth-recovery { margin: -7px 0 0; color: var(--faint); font-size: 9px; text-align: center; }
 .auth-recovery a { color: var(--text-soft); text-underline-offset: 3px; }
 .auth-recovery a:hover { color: var(--signal); }
+.auth-entry-links { display: flex; justify-content: center; gap: 9px; }
 .auth-config-warning { padding: 11px 12px; border: 1px solid var(--danger-border); border-radius: 5px; background: var(--danger-wash); color: var(--danger); font-size: 10px; line-height: 1.6; }
 
 .account-page { min-height: 100svh; padding: 28px 24px 70px; background: var(--canvas); }

@@ -16,8 +16,9 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
+  const { userId } = auth.session;
   const { id } = await context.params;
   const parsed = noteSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -30,9 +31,9 @@ export async function PATCH(
     .prepare(
       `UPDATE notebook_notes
        SET title = ?, summary = ?, content = ?, updated_at = ?
-       WHERE id = ?`
+       WHERE id = ? AND user_id = ?`
     )
-    .run(parsed.data.title, parsed.data.summary, parsed.data.content, now, id);
+    .run(parsed.data.title, parsed.data.summary, parsed.data.content, now, id, userId);
   if (!result.changes) {
     return NextResponse.json({ error: "没有找到这条笔记。" }, { status: 404 });
   }
@@ -40,9 +41,9 @@ export async function PATCH(
   const row = db
     .prepare(
       `SELECT id, title, summary, content, source_item_title, provider, created_at
-       FROM notebook_notes WHERE id = ?`
+       FROM notebook_notes WHERE id = ? AND user_id = ?`
     )
-    .get(id) as Record<string, string | number | null>;
+    .get(id, userId) as Record<string, string | number | null>;
   return NextResponse.json({ note: mapNotebookNote(row), message: "笔记已更新。" });
 }
 
@@ -50,11 +51,12 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
   const { id } = await context.params;
   const db = getDb();
-  const result = db.prepare("DELETE FROM notebook_notes WHERE id = ?").run(id);
+  const result = db.prepare("DELETE FROM notebook_notes WHERE id = ? AND user_id = ?")
+    .run(id, auth.session.userId);
   if (!result.changes) {
     return NextResponse.json({ error: "没有找到这条笔记。" }, { status: 404 });
   }

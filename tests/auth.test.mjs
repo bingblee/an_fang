@@ -11,7 +11,7 @@ import { test } from "node:test";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-test("single-owner authentication protects pages, APIs, sessions, and password changes", async () => {
+test("multi-user authentication protects registration, data isolation, sessions, and password changes", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "anfang-auth-test-"));
   const setupToken = "auth-test-setup-token-32-characters";
   const reservation = createServer();
@@ -28,6 +28,7 @@ test("single-owner authentication protects pages, APIs, sessions, and password c
       DATA_DIR: "",
       TEST_DATA_DIR: dataDir,
       AUTH_SETUP_TOKEN: setupToken,
+      DEEPSEEK_API_KEY: "",
       NEXT_TELEMETRY_DISABLED: "1"
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -67,6 +68,9 @@ test("single-owner authentication protects pages, APIs, sessions, and password c
     const privatePage = await fetch(baseUrl, { redirect: "manual" });
     assert.ok([307, 308].includes(privatePage.status));
     assert.equal(new URL(privatePage.headers.get("location"), baseUrl).pathname, "/login");
+    const earlyRegistration = await fetch(`${baseUrl}/register`, { redirect: "manual" });
+    assert.ok([307, 308].includes(earlyRegistration.status));
+    assert.equal(new URL(earlyRegistration.headers.get("location"), baseUrl).pathname, "/setup");
     const missingAttachment = await json("/api/attachments/missing");
     assert.equal(missingAttachment.response.status, 401);
     const loginArtwork = await fetch(`${baseUrl}/auth-sanctuary.jpg`);
@@ -80,6 +84,11 @@ test("single-owner authentication protects pages, APIs, sessions, and password c
       setupConfigured: true,
       username: null
     });
+    assert.equal((await post("/api/auth/register", {
+      username: "抢先注册",
+      password: "early-register-123",
+      remember: true
+    })).response.status, 409);
     assert.equal((await post("/api/auth/setup", { setupToken: "wrong", username: "主人", password: "strong-pass-123", remember: true })).response.status, 403);
     assert.equal((await post("/api/auth/setup", { setupToken, username: "主人", password: "strong-pass-123", remember: true }, null, { Origin: "https://evil.example" })).response.status, 403);
 
@@ -108,11 +117,133 @@ test("single-owner authentication protects pages, APIs, sessions, and password c
     ).run(rememberedHash, new Date().toISOString(), new Date().toISOString());
 
     assert.equal((await post("/api/auth/setup", { setupToken, username: "另一个人", password: "another-pass-123", remember: true })).response.status, 409);
+    assert.equal((await fetch(`${baseUrl}/register`)).status, 200);
     assert.equal((await json("/api/dashboard", { headers: { Cookie: rememberedCookie } })).response.status, 200);
     assert.equal((await json("/api/attachments/missing", { headers: { Cookie: rememberedCookie } })).response.status, 404);
     const signedInState = await json("/api/auth/state", { headers: { Cookie: rememberedCookie } });
     assert.equal(signedInState.body.authenticated, true);
     assert.equal(signedInState.body.username, "主人");
+
+    const ownerTopic = await post(
+      "/api/topics",
+      { name: "共同话题", description: "主人自己的内容" },
+      rememberedCookie
+    );
+    assert.equal(ownerTopic.response.status, 201);
+    const ownerNote = await post(
+      "/api/notebook",
+      { title: "主人笔记", content: "只有主人可以看到" },
+      rememberedCookie
+    );
+    assert.equal(ownerNote.response.status, 201);
+    const ownerCaptureForm = new FormData();
+    ownerCaptureForm.set("text", "共同事项");
+    ownerCaptureForm.set("topicId", ownerTopic.body.topic.id);
+    ownerCaptureForm.set(
+      "attachment",
+      new Blob([Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==", "base64")], { type: "image/png" }),
+      "主人截图.png"
+    );
+    const ownerCaptureResponse = await fetch(`${baseUrl}/api/captures`, {
+      method: "POST",
+      headers: { Origin: baseUrl, Cookie: rememberedCookie },
+      body: ownerCaptureForm
+    });
+    assert.equal(ownerCaptureResponse.status, 200);
+    const ownerCapture = await ownerCaptureResponse.json();
+
+    assert.equal((await post("/api/auth/register", {
+      username: "成员甲",
+      password: "member-pass-123",
+      remember: true
+    }, null, { Origin: "https://evil.example" })).response.status, 403);
+    assert.equal((await post("/api/auth/register", {
+      username: "成员甲",
+      password: "too-short",
+      remember: true
+    })).response.status, 400);
+    const registration = await post("/api/auth/register", {
+      username: "成员甲",
+      password: "member-pass-123",
+      remember: true
+    });
+    assert.equal(registration.response.status, 201);
+    const memberCookie = registration.response.headers.get("set-cookie").split(";", 1)[0];
+    assert.equal((await post("/api/auth/register", {
+      username: " 成员甲 ",
+      password: "member-pass-456",
+      remember: true
+    })).response.status, 409);
+
+    const emptyMemberDashboard = await json("/api/dashboard", { headers: { Cookie: memberCookie } });
+    assert.equal(emptyMemberDashboard.response.status, 200);
+    assert.equal(emptyMemberDashboard.body.totalOpen, 0);
+    assert.deepEqual(emptyMemberDashboard.body.topics, []);
+    assert.deepEqual(emptyMemberDashboard.body.notebook, []);
+
+    const memberTopic = await post(
+      "/api/topics",
+      { name: "共同话题", description: "成员甲自己的同名话题" },
+      memberCookie
+    );
+    assert.equal(memberTopic.response.status, 201);
+    assert.notEqual(memberTopic.body.topic.id, ownerTopic.body.topic.id);
+    const memberNote = await post(
+      "/api/notebook",
+      { title: "成员笔记", content: "只有成员甲可以看到" },
+      memberCookie
+    );
+    assert.equal(memberNote.response.status, 201);
+    const memberCaptureForm = new FormData();
+    memberCaptureForm.set("text", "共同事项");
+    memberCaptureForm.set("topicId", memberTopic.body.topic.id);
+    const memberCaptureResponse = await fetch(`${baseUrl}/api/captures`, {
+      method: "POST",
+      headers: { Origin: baseUrl, Cookie: memberCookie },
+      body: memberCaptureForm
+    });
+    assert.equal(memberCaptureResponse.status, 200);
+    const memberCapture = await memberCaptureResponse.json();
+    assert.notEqual(memberCapture.item.id, ownerCapture.item.id);
+
+    assert.equal((await json(`/api/topics/${ownerTopic.body.topic.id}`, { headers: { Cookie: memberCookie } })).response.status, 404);
+    assert.equal((await json(`/api/attachments/${ownerCapture.item.attachment.id}`, { headers: { Cookie: memberCookie } })).response.status, 404);
+    const crossItemEdit = await fetch(`${baseUrl}/api/items/${ownerCapture.item.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Origin: baseUrl, Cookie: memberCookie },
+      body: JSON.stringify({ action: "rename", title: "越权修改" })
+    });
+    assert.equal(crossItemEdit.status, 404);
+    assert.equal((await post(
+      `/api/items/${ownerCapture.item.id}/suggestions`,
+      { request: "给这条事项建议" },
+      memberCookie
+    )).response.status, 404);
+    const crossNoteDelete = await fetch(`${baseUrl}/api/notebook/${ownerNote.body.note.id}`, {
+      method: "DELETE",
+      headers: { Origin: baseUrl, Cookie: memberCookie }
+    });
+    assert.equal(crossNoteDelete.status, 404);
+    const crossTopicChoice = new FormData();
+    crossTopicChoice.set("text", "放进别人的话题");
+    crossTopicChoice.set("topicId", ownerTopic.body.topic.id);
+    const crossTopicCapture = await fetch(`${baseUrl}/api/captures`, {
+      method: "POST",
+      headers: { Origin: baseUrl, Cookie: memberCookie },
+      body: crossTopicChoice
+    });
+    assert.equal(crossTopicCapture.status, 404);
+
+    const ownerDashboard = await json("/api/dashboard", { headers: { Cookie: rememberedCookie } });
+    assert.equal(ownerDashboard.body.totalOpen, 1);
+    assert.equal(ownerDashboard.body.topics.length, 1);
+    assert.equal(ownerDashboard.body.notebook.length, 1);
+    assert.equal(ownerDashboard.body.notebook[0].title, "主人笔记");
+    const memberDashboard = await json("/api/dashboard", { headers: { Cookie: memberCookie } });
+    assert.equal(memberDashboard.body.totalOpen, 1);
+    assert.equal(memberDashboard.body.topics.length, 1);
+    assert.equal(memberDashboard.body.notebook.length, 1);
+    assert.equal(memberDashboard.body.notebook[0].title, "成员笔记");
 
     assert.equal((await post("/api/auth/logout", {}, rememberedCookie, { Origin: "https://evil.example" })).response.status, 403);
     const logout = await post("/api/auth/logout", {}, rememberedCookie);
@@ -143,6 +274,7 @@ test("single-owner authentication protects pages, APIs, sessions, and password c
     const changedCookie = changed.headers.get("set-cookie").split(";", 1)[0];
     assert.equal((await json("/api/dashboard", { headers: { Cookie: sessionCookie } })).response.status, 401);
     assert.equal((await json("/api/dashboard", { headers: { Cookie: changedCookie } })).response.status, 200);
+    assert.equal((await json("/api/dashboard", { headers: { Cookie: memberCookie } })).response.status, 200);
     assert.equal((await post("/api/auth/login", { username: "主人", password: "strong-pass-123", remember: true })).response.status, 401);
     assert.equal((await post("/api/auth/login", { username: "主人", password: "new-strong-pass-456", remember: true })).response.status, 200);
 
@@ -171,6 +303,7 @@ test("single-owner authentication protects pages, APIs, sessions, and password c
     const recoveredCookie = recoveredHeader.split(";", 1)[0];
     assert.equal((await json("/api/dashboard", { headers: { Cookie: changedCookie } })).response.status, 401);
     assert.equal((await json("/api/dashboard", { headers: { Cookie: recoveredCookie } })).response.status, 200);
+    assert.equal((await json("/api/dashboard", { headers: { Cookie: memberCookie } })).response.status, 200);
     assert.equal((await post("/api/auth/login", { username: "主人", password: "new-strong-pass-456", remember: true })).response.status, 401);
     database.close();
   } finally {

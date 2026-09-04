@@ -11,14 +11,17 @@ export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
   const { id } = await context.params;
   const row = getDb()
     .prepare(
-      "SELECT storage_path, mime_type, original_name FROM attachments WHERE id = ?"
+      `SELECT attachment.storage_path, attachment.mime_type, attachment.original_name
+       FROM attachments attachment
+       JOIN captures capture ON capture.id = attachment.capture_id
+       WHERE attachment.id = ? AND capture.user_id = ?`
     )
-    .get(id) as
+    .get(id, auth.session.userId) as
     | { storage_path: string; mime_type: string; original_name: string }
     | undefined;
 

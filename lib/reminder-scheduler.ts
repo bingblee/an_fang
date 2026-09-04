@@ -10,6 +10,7 @@ declare global {
 
 type DueItem = {
   id: string;
+  user_id: string;
   title: string;
   scheduled_for: string;
   source_excerpt: string | null;
@@ -17,6 +18,7 @@ type DueItem = {
 
 type PushRow = {
   id: string;
+  user_id: string;
   endpoint: string;
   p256dh: string;
   auth: string;
@@ -30,9 +32,10 @@ export async function checkDueReminders() {
     const db = getDb();
     const dueItems = db
       .prepare(
-        `SELECT i.id, i.title, i.scheduled_for, i.source_excerpt
+        `SELECT i.id, i.user_id, i.title, i.scheduled_for, i.source_excerpt
          FROM items i
-         WHERE i.status = 'scheduled'
+         WHERE i.user_id IS NOT NULL
+           AND i.status = 'scheduled'
            AND i.scheduled_for IS NOT NULL
            AND i.scheduled_for <= ?
            AND NOT EXISTS (
@@ -49,10 +52,12 @@ export async function checkDueReminders() {
 
     const subscriptions = db
       .prepare(
-        `SELECT subscription.id, subscription.endpoint, subscription.p256dh, subscription.auth
+        `SELECT subscription.id, subscription.user_id, subscription.endpoint,
+                subscription.p256dh, subscription.auth
          FROM push_subscriptions subscription
          JOIN auth_sessions session ON session.token_hash = subscription.session_token_hash
-         WHERE session.expires_at > ?`
+           AND session.user_id = subscription.user_id
+         WHERE subscription.user_id IS NOT NULL AND session.expires_at > ?`
       )
       .all(new Date().toISOString()) as unknown as PushRow[];
     if (!subscriptions.length) return;
@@ -60,7 +65,7 @@ export async function checkDueReminders() {
     const sender = configureWebPush();
     for (const item of dueItems) {
       let delivered = false;
-      for (const subscription of subscriptions) {
+      for (const subscription of subscriptions.filter((entry) => entry.user_id === item.user_id)) {
         try {
           await sender.sendNotification(
             {

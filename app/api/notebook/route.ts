@@ -17,8 +17,9 @@ const createNoteSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
+  const { userId } = auth.session;
   const parsed = createNoteSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message || "笔记内容不正确。" }, { status: 400 });
@@ -31,15 +32,15 @@ export async function POST(request: NextRequest) {
   const summary = notebookSummaryFromMarkdown(parsed.data.content, Boolean(parsed.data.title));
   db.prepare(
     `INSERT INTO notebook_notes
-      (id, source_item_id, source_enrichment_id, title, summary, content,
+      (id, user_id, source_item_id, source_enrichment_id, title, summary, content,
        source_item_title, provider, created_at, updated_at)
-     VALUES (?, NULL, NULL, ?, ?, ?, NULL, 'manual', ?, ?)`
-  ).run(id, title, summary, parsed.data.content, now, now);
+     VALUES (?, ?, NULL, NULL, ?, ?, ?, NULL, 'manual', ?, ?)`
+  ).run(id, userId, title, summary, parsed.data.content, now, now);
 
   const row = db.prepare(
     `SELECT id, title, summary, content, source_item_title, provider, created_at
-     FROM notebook_notes WHERE id = ?`
-  ).get(id) as Record<string, string | number | null>;
+     FROM notebook_notes WHERE id = ? AND user_id = ?`
+  ).get(id, userId) as Record<string, string | number | null>;
   return NextResponse.json({
     note: mapNotebookNote(row),
     message: "笔记已留下。"

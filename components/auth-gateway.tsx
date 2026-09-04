@@ -1,10 +1,10 @@
 "use client";
 
-import { Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole } from "lucide-react";
+import { Eye, EyeOff, KeyRound, LoaderCircle, LockKeyhole, UserRoundPlus } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 
-type AuthMode = "login" | "setup" | "recover";
+type AuthMode = "login" | "register" | "setup" | "recover";
 
 export function AuthGateway({
   mode,
@@ -24,13 +24,15 @@ export function AuthGateway({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const setup = mode === "setup";
+  const register = mode === "register";
   const recovery = mode === "recover";
   const needsToken = setup || recovery;
+  const needsConfirmation = setup || register || recovery;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (submitting || (needsToken && !setupConfigured)) return;
-    if (needsToken && password !== confirmation) {
+    if (needsConfirmation && password !== confirmation) {
       setError("两次输入的密码不一致。");
       return;
     }
@@ -57,19 +59,19 @@ export function AuthGateway({
       <div className="auth-theme"><ThemeToggle /></div>
       <section className="auth-threshold" aria-labelledby="auth-title">
         <div className="auth-intro">
-          <a className="brand auth-brand" href={setup ? "/setup" : recovery ? "/recover" : "/login"} aria-label="安放">
+          <a className="brand auth-brand" href={setup ? "/setup" : register ? "/register" : recovery ? "/recover" : "/login"} aria-label="安放">
             <span className="brand-stamp">安</span>
             <span className="brand-copy"><strong>安放</strong><small>LIFE NAVIGATOR</small></span>
           </a>
           <div className="auth-intro-copy">
-            <h1 id="auth-title">{setup ? "先把这扇门交给你" : recovery ? "重新拿回这把钥匙" : "回到你的安放之处"}</h1>
+            <h1 id="auth-title">{setup ? "先把这扇门交给你" : register ? "给自己留一处安放" : recovery ? "重新拿回这把钥匙" : "回到你的安放之处"}</h1>
           </div>
         </div>
 
         <form className="auth-form" onSubmit={submit}>
           <div className="auth-form-heading">
-            <span className="auth-key-mark"><KeyRound size={18} /></span>
-            <strong>{setup ? "首次设置" : recovery ? "重置密码" : "主人登录"}</strong>
+            <span className="auth-key-mark">{register ? <UserRoundPlus size={18} /> : <KeyRound size={18} />}</span>
+            <strong>{setup ? "首次设置" : register ? "创建账号" : recovery ? "重置密码" : "账号登录"}</strong>
           </div>
 
           {!setupConfigured && (
@@ -99,9 +101,9 @@ export function AuthGateway({
             <div className="password-input">
               <input type={showPassword ? "text" : "password"} value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                autoComplete={needsToken ? "new-password" : "current-password"} required
-                minLength={needsToken ? 10 : 1} maxLength={200} disabled={submitting}
-                placeholder={needsToken ? "至少 10 位，含字母和数字" : "输入密码"} />
+                autoComplete={needsConfirmation ? "new-password" : "current-password"} required
+                minLength={needsConfirmation ? 10 : 1} maxLength={200} disabled={submitting}
+                placeholder={needsConfirmation ? "至少 10 位，含字母和数字" : "输入密码"} />
               <button type="button" onClick={() => setShowPassword((value) => !value)}
                 aria-label={showPassword ? "隐藏密码" : "显示密码"} tabIndex={-1}>
                 {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
@@ -109,7 +111,7 @@ export function AuthGateway({
             </div>
           </label>
 
-          {needsToken && (
+          {needsConfirmation && (
             <label className="auth-field">
               <span>{recovery ? "确认新密码" : "确认密码"}</span>
               <input type={showPassword ? "text" : "password"} value={confirmation}
@@ -128,9 +130,10 @@ export function AuthGateway({
 
           <button className="auth-submit" type="submit" disabled={submitting || (needsToken && !setupConfigured)}>
             {submitting ? <LoaderCircle className="spin" size={17} /> : <LockKeyhole size={17} />}
-            {submitting ? "正在确认……" : setup ? "创建并进入" : recovery ? "重置并进入" : "进入安放"}
+            {submitting ? "正在确认……" : setup || register ? "创建并进入" : recovery ? "重置并进入" : "进入安放"}
           </button>
-          {!needsToken && <p className="auth-recovery"><a href="/recover">忘记密码</a></p>}
+          {mode === "login" && <p className="auth-recovery auth-entry-links"><a href="/register">创建账号</a><span>·</span><a href="/recover">忘记密码</a></p>}
+          {register && <p className="auth-recovery"><a href="/login">已有账号，返回登录</a></p>}
           {recovery && <p className="auth-recovery"><a href="/login">返回登录</a></p>}
         </form>
       </section>

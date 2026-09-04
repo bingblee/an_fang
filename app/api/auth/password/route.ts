@@ -3,8 +3,7 @@ import { z } from "zod";
 import {
   changePassword,
   createSession,
-  findUser,
-  getCurrentSession,
+  findUserById,
   passwordProblem,
   requireApiSession,
   setSessionCookie,
@@ -20,8 +19,8 @@ const passwordSchema = z.object({
 });
 
 export async function PATCH(request: NextRequest) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
   const parsed = passwordSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "请完整填写密码。" }, { status: 400 });
   const passwordError = passwordProblem(parsed.data.newPassword);
@@ -29,9 +28,8 @@ export async function PATCH(request: NextRequest) {
   if (parsed.data.currentPassword === parsed.data.newPassword) {
     return NextResponse.json({ error: "新密码需要与当前密码不同。" }, { status: 400 });
   }
-  const current = await getCurrentSession();
-  if (!current) return NextResponse.json({ error: "登录状态已失效，请重新登录。" }, { status: 401 });
-  const user = findUser(current.username);
+  const current = auth.session;
+  const user = findUserById(current.userId);
   if (!user || !(await verifyPassword(parsed.data.currentPassword, user.password_hash, user.password_salt))) {
     return NextResponse.json({ error: "当前密码不正确。" }, { status: 401 });
   }

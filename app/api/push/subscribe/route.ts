@@ -17,8 +17,8 @@ const subscriptionSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
   if (!getRuntimeConfig().remindersEnabled) return NextResponse.json({ error: "当前环境不发送系统提醒。" }, { status: 403 });
   const parsed = subscriptionSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -30,9 +30,10 @@ export async function POST(request: NextRequest) {
   getDb()
     .prepare(
       `INSERT INTO push_subscriptions
-        (id, endpoint, p256dh, auth, session_token_hash, user_agent, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (id, user_id, endpoint, p256dh, auth, session_token_hash, user_agent, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(endpoint) DO UPDATE SET
+         user_id = excluded.user_id,
          p256dh = excluded.p256dh,
          auth = excluded.auth,
          session_token_hash = excluded.session_token_hash,
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest) {
     )
     .run(
       randomUUID(),
+      auth.session.userId,
       parsed.data.endpoint,
       parsed.data.keys.p256dh,
       parsed.data.keys.auth,
@@ -53,15 +55,15 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
   const parsed = z.object({ endpoint: z.string().url().max(4096) })
     .safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "提醒订阅信息无效。" }, { status: 400 });
   const sessionTokenHash = await getCurrentSessionTokenHash();
   if (!sessionTokenHash) return NextResponse.json({ error: "登录状态已失效。" }, { status: 401 });
   getDb().prepare(
-    "DELETE FROM push_subscriptions WHERE endpoint = ? AND session_token_hash = ?"
-  ).run(parsed.data.endpoint, sessionTokenHash);
+    "DELETE FROM push_subscriptions WHERE endpoint = ? AND session_token_hash = ? AND user_id = ?"
+  ).run(parsed.data.endpoint, sessionTokenHash, auth.session.userId);
   return NextResponse.json({ ok: true });
 }

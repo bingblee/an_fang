@@ -16,14 +16,15 @@ export function topicNameKey(name: string) {
   return name.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-export function listTopics(db: DatabaseSync): Topic[] {
+export function listTopics(db: DatabaseSync, userId: string): Topic[] {
   const rows = db.prepare(`
     SELECT t.*,
       COUNT(CASE WHEN i.status IN ('scheduled', 'doing', 'waiting', 'later') THEN 1 END) AS open_count,
       COUNT(CASE WHEN i.status = 'completed' THEN 1 END) AS completed_count
-    FROM topics t LEFT JOIN items i ON i.topic_id = t.id
+    FROM topics t LEFT JOIN items i ON i.topic_id = t.id AND i.user_id = t.user_id
+    WHERE t.user_id = ?
     GROUP BY t.id ORDER BY t.created_at DESC, t.id
-  `).all();
+  `).all(userId);
   return rows.map((row) => ({
     id: String(row.id), name: String(row.name), description: String(row.description),
     openCount: Number(row.open_count), completedCount: Number(row.completed_count),
@@ -31,17 +32,17 @@ export function listTopics(db: DatabaseSync): Topic[] {
   }));
 }
 
-export function createTopic(db: DatabaseSync, input: z.infer<typeof topicSchema>) {
+export function createTopic(db: DatabaseSync, userId: string, input: z.infer<typeof topicSchema>) {
   const parsed = topicSchema.parse(input);
   const id = randomUUID();
   const now = new Date().toISOString();
   const key = topicNameKey(parsed.name);
   const result = db.prepare(`
-    INSERT INTO topics (id, name, name_key, description, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(name_key) DO NOTHING
-  `).run(id, parsed.name, key, parsed.description, now, now);
-  const existing = db.prepare("SELECT id FROM topics WHERE name_key = ?").get(key)!;
-  return { topic: listTopics(db).find((topic) => topic.id === existing.id)!, created: Number(result.changes) > 0 };
+    INSERT INTO topics (id, user_id, name, name_key, description, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, name_key) DO NOTHING
+  `).run(id, userId, parsed.name, key, parsed.description, now, now);
+  const existing = db.prepare("SELECT id FROM topics WHERE user_id = ? AND name_key = ?").get(userId, key)!;
+  return { topic: listTopics(db, userId).find((topic) => topic.id === existing.id)!, created: Number(result.changes) > 0 };
 }
 
 // Only an explicit leading command creates a topic. Quoted conversations and ordinary tasks stay tasks.

@@ -10,27 +10,28 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
+  const { userId } = auth.session;
   const db = getDb();
   const rows = db
     .prepare(
       `${itemSelect}
-       WHERE i.status NOT IN ('completed', 'abandoned', 'merged')
+       WHERE i.user_id = ? AND i.status NOT IN ('completed', 'abandoned', 'merged')
        ORDER BY
          CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,
          COALESCE(i.scheduled_for, '9999-12-31T23:59:59.999Z'),
          i.created_at DESC`
     )
-    .all() as Array<Record<string, string | number | null>>;
+    .all(userId) as Array<Record<string, string | number | null>>;
   const items = rows.map(mapItem);
   const notebook = (
     db
       .prepare(
         `SELECT id, title, summary, content, source_item_title, provider, created_at
-         FROM notebook_notes ORDER BY created_at DESC`
+         FROM notebook_notes WHERE user_id = ? ORDER BY created_at DESC`
       )
-      .all() as Array<Record<string, string | number | null>>
+      .all(userId) as Array<Record<string, string | number | null>>
   ).map(mapNotebookNote);
 
   const now = new Date();
@@ -65,13 +66,13 @@ export async function GET(request: NextRequest) {
   const completedRow = db
     .prepare(
       `SELECT COUNT(*) AS count FROM items
-       WHERE status = 'completed' AND completed_at >= ?`
+       WHERE user_id = ? AND status = 'completed' AND completed_at >= ?`
     )
-    .get(startOfToday.toISOString()) as { count: number };
+    .get(userId, startOfToday.toISOString()) as { count: number };
 
   const data: DashboardData = {
-    topics: listTopics(db),
-    categories: listCategories(db),
+    topics: listTopics(db, userId),
+    categories: listCategories(db, userId),
     today,
     quick,
     doing,

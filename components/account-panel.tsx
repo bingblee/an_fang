@@ -82,7 +82,7 @@ export function AccountPanel({ username }: { username: string }) {
       <section className="account-sheet">
         <div className="account-identity">
           <span className="account-monogram">{username.slice(0, 1).toLocaleUpperCase("zh-CN")}</span>
-          <div><p>主人账号</p><h1>{username}</h1></div>
+          <div><p>个人账号</p><h1>{username}</h1></div>
         </div>
         <form className="account-form" onSubmit={change}>
           <div className="account-section-heading"><strong>修改密码</strong></div>

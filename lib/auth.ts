@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { claimLegacyData, getDb } from "@/lib/db";
 
 export const sessionCookieName = "anfang_session";
 export const rememberedSessionSeconds = 60 * 60 * 24 * 30;
@@ -90,7 +90,17 @@ export function findUser(username: string) {
     .get(normalizeUsername(username)) as UserRow | undefined;
 }
 
-export async function createOwner(username: string, password: string) {
+export function findUserById(userId: string) {
+  return getDb()
+    .prepare("SELECT id, username, username_key, password_hash, password_salt FROM auth_users WHERE id = ?")
+    .get(userId) as UserRow | undefined;
+}
+
+async function createAccount(
+  username: string,
+  password: string,
+  options: { onlyFirst: boolean; claimLegacy: boolean }
+) {
   const db = getDb();
   const displayName = username.trim().normalize("NFKC");
   const key = normalizeUsername(displayName);
@@ -101,7 +111,10 @@ export async function createOwner(username: string, password: string) {
   try {
     db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
-    if (db.prepare("SELECT 1 FROM auth_users LIMIT 1").get()) {
+    if (
+      (options.onlyFirst && db.prepare("SELECT 1 FROM auth_users LIMIT 1").get()) ||
+      db.prepare("SELECT 1 FROM auth_users WHERE username_key = ?").get(key)
+    ) {
       db.exec("ROLLBACK");
       transactionOpen = false;
       return null;
@@ -111,6 +124,7 @@ export async function createOwner(username: string, password: string) {
         (id, username, username_key, password_hash, password_salt, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(userId, displayName, key, credentials.hash, credentials.salt, now, now);
+    if (options.claimLegacy) claimLegacyData(db, userId);
     db.exec("COMMIT");
     transactionOpen = false;
     return { id: userId, username: displayName };
@@ -118,6 +132,14 @@ export async function createOwner(username: string, password: string) {
     if (transactionOpen) db.exec("ROLLBACK");
     throw error;
   }
+}
+
+export async function createOwner(username: string, password: string) {
+  return createAccount(username, password, { onlyFirst: true, claimLegacy: true });
+}
+
+export async function createUser(username: string, password: string) {
+  return createAccount(username, password, { onlyFirst: false, claimLegacy: false });
 }
 
 function sessionHash(token: string) {
@@ -230,17 +252,28 @@ export function requestOriginAllowed(request: NextRequest) {
   return origin === expected;
 }
 
-export async function requireApiSession(request: NextRequest) {
+export type ApiSessionResult =
+  | { ok: true; session: AuthSession }
+  | { ok: false; response: NextResponse };
+
+export async function requireApiSession(request: NextRequest): Promise<ApiSessionResult> {
   if (!requestOriginAllowed(request)) {
-    return NextResponse.json({ error: "请求来源无效，请刷新页面后重试。" }, { status: 403 });
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "请求来源无效，请刷新页面后重试。" }, { status: 403 })
+    };
   }
-  if (!(await getCurrentSession())) {
-    return NextResponse.json(
-      { error: "登录状态已失效，请重新登录。" },
-      { status: 401, headers: { "Cache-Control": "no-store" } }
-    );
+  const session = await getCurrentSession();
+  if (!session) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "登录状态已失效，请重新登录。" },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
+      )
+    };
   }
-  return null;
+  return { ok: true, session };
 }
 
 function loginAttemptKey(request: NextRequest, username: string) {

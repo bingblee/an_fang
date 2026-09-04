@@ -25,8 +25,9 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string; suggestionId: string }> }
 ) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
+  const { userId } = auth.session;
   const { id, suggestionId } = await context.params;
   const parsed = actionSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -42,16 +43,16 @@ export async function PATCH(
        FROM item_enrichments enrichment
        JOIN items item ON item.id = enrichment.item_id
        WHERE enrichment.id = ? AND enrichment.item_id = ?
-         AND enrichment.status = 'ready'`
+         AND enrichment.status = 'ready' AND item.user_id = ?`
     )
-    .get(suggestionId, id) as EnrichmentRow | undefined;
+    .get(suggestionId, id, userId) as EnrichmentRow | undefined;
   if (!suggestion) {
     return NextResponse.json({ error: "没有找到这条建议。" }, { status: 404 });
   }
 
   const existingNote = db
-    .prepare("SELECT id FROM notebook_notes WHERE source_enrichment_id = ?")
-    .get(suggestionId) as { id: string } | undefined;
+    .prepare("SELECT id FROM notebook_notes WHERE source_enrichment_id = ? AND user_id = ?")
+    .get(suggestionId, userId) as { id: string } | undefined;
   if (existingNote) {
     return NextResponse.json({
       message: "笔记本中已有副本，事项里的建议仍然保留。",
@@ -68,11 +69,12 @@ export async function PATCH(
     transactionStarted = true;
     db.prepare(
       `INSERT INTO notebook_notes
-        (id, source_item_id, source_enrichment_id, title, summary, content,
+        (id, user_id, source_item_id, source_enrichment_id, title, summary, content,
          source_item_title, provider, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       noteId,
+      userId,
       suggestion.item_id,
       suggestion.id,
       suggestion.title,
@@ -85,9 +87,9 @@ export async function PATCH(
     );
     db.prepare(
       `INSERT INTO feedback
-        (id, item_id, kind, corrected_value, created_at)
-       VALUES (?, ?, 'suggestion_copied_to_notebook', ?, ?)`
-    ).run(randomUUID(), id, noteId, now);
+        (id, user_id, item_id, kind, corrected_value, created_at)
+       VALUES (?, ?, ?, 'suggestion_copied_to_notebook', ?, ?)`
+    ).run(randomUUID(), userId, id, noteId, now);
     db.exec("COMMIT");
     transactionStarted = false;
   } catch (error) {
@@ -106,24 +108,28 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ id: string; suggestionId: string }> }
 ) {
-  const unauthorized = await requireApiSession(request);
-  if (unauthorized) return unauthorized;
+  const auth = await requireApiSession(request);
+  if (!auth.ok) return auth.response;
   const { id, suggestionId } = await context.params;
   const db = getDb();
   const now = new Date().toISOString();
   const result = db
     .prepare(
       `DELETE FROM item_enrichments
-       WHERE id = ? AND item_id = ? AND status = 'ready'`
+       WHERE id = ? AND item_id = ? AND status = 'ready'
+         AND EXISTS (
+           SELECT 1 FROM items
+           WHERE items.id = item_enrichments.item_id AND items.user_id = ?
+         )`
     )
-    .run(suggestionId, id);
+    .run(suggestionId, id, auth.session.userId);
   if (!result.changes) {
     return NextResponse.json({ error: "没有找到这条建议。" }, { status: 404 });
   }
   db.prepare(
     `INSERT INTO feedback
-      (id, item_id, kind, corrected_value, created_at)
-     VALUES (?, ?, 'suggestion_deleted', ?, ?)`
-  ).run(randomUUID(), id, suggestionId, now);
+      (id, user_id, item_id, kind, corrected_value, created_at)
+     VALUES (?, ?, ?, 'suggestion_deleted', ?, ?)`
+  ).run(randomUUID(), auth.session.userId, id, suggestionId, now);
   return NextResponse.json({ message: "建议便笺已删除。" });
 }
