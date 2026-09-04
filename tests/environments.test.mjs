@@ -74,11 +74,17 @@ test("production data refresh replaces development safely and rewrites attachmen
     CREATE TABLE topics (id TEXT PRIMARY KEY);
     CREATE TABLE notebook_notes (id TEXT PRIMARY KEY);
     CREATE TABLE attachments (id TEXT PRIMARY KEY, storage_path TEXT, sha256 TEXT);
-    CREATE TABLE push_subscriptions (endpoint TEXT PRIMARY KEY);`);
+    CREATE TABLE push_subscriptions (endpoint TEXT PRIMARY KEY);
+    CREATE TABLE auth_users (id TEXT PRIMARY KEY, username TEXT);
+    CREATE TABLE auth_sessions (token_hash TEXT PRIMARY KEY);
+    CREATE TABLE auth_login_attempts (attempt_key TEXT PRIMARY KEY);`);
   prodDb.prepare("INSERT INTO captures VALUES ('production')").run();
   prodDb.prepare("INSERT INTO items VALUES ('production-item')").run();
   prodDb.prepare("INSERT INTO attachments VALUES ('image', ?, ?)").run(upload, hash(upload));
   prodDb.prepare("INSERT INTO push_subscriptions VALUES ('https://push.example.test')").run();
+  prodDb.prepare("INSERT INTO auth_users VALUES ('owner', '主人')").run();
+  prodDb.prepare("INSERT INTO auth_sessions VALUES ('formal-session')").run();
+  prodDb.prepare("INSERT INTO auth_login_attempts VALUES ('formal-attempt')").run();
   prodDb.close();
   const devDb = new DatabaseSync(dev.databasePath);
   devDb.exec("CREATE TABLE captures (id TEXT PRIMARY KEY); INSERT INTO captures VALUES ('previous-development');");
@@ -90,6 +96,9 @@ test("production data refresh replaces development safely and rewrites attachmen
   const refreshed = new DatabaseSync(dev.databasePath, { readOnly: true });
   assert.equal(refreshed.prepare("SELECT id FROM captures").get().id, "production");
   assert.equal(refreshed.prepare("SELECT count(*) AS count FROM push_subscriptions").get().count, 0);
+  assert.equal(refreshed.prepare("SELECT count(*) AS count FROM auth_users").get().count, 1);
+  assert.equal(refreshed.prepare("SELECT count(*) AS count FROM auth_sessions").get().count, 0);
+  assert.equal(refreshed.prepare("SELECT count(*) AS count FROM auth_login_attempts").get().count, 0);
   const copiedAttachment = refreshed.prepare("SELECT storage_path FROM attachments").get().storage_path;
   refreshed.close();
   assert.ok(copiedAttachment.startsWith(join(dev.dataDir, "uploads")));

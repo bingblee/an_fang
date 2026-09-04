@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
+import { requireApiSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +25,8 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string; suggestionId: string }> }
 ) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const { id, suggestionId } = await context.params;
   const parsed = actionSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -100,9 +103,11 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ id: string; suggestionId: string }> }
 ) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const { id, suggestionId } = await context.params;
   const db = getDb();
   const now = new Date().toISOString();

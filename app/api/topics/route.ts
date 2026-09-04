@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { createTopic, listTopics, topicSchema } from "@/lib/topics";
+import { requireApiSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   return NextResponse.json({ topics: listTopics(getDb()) }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: NextRequest) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const parsed = topicSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message || "话题信息不正确。" }, { status: 400 });
   const result = createTopic(getDb(), parsed.data);

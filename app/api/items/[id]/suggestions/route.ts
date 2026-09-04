@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb, itemSelect, mapItem } from "@/lib/db";
 import { createItemEnrichment } from "@/lib/enrichment";
+import { requireApiSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,8 @@ export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const { id } = await context.params;
   const body = await request.json().catch(() => ({}));
   const parsed = requestSchema.safeParse(body);

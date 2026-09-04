@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   title: "安放 · 个人 AI 外部大脑",
   description: "想到的事，先放在这里。",
   applicationName: "安放",
+  robots: { index: false, follow: false },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

@@ -13,7 +13,8 @@ import { ensureDataDirectory, getRuntimeConfig } from "../lib/runtime-config.mjs
 
 // Exercise the production routes against a disposable database and a deterministic
 // model endpoint. No real API key, user data, notifications, or external AI calls.
-let dataDir, app, db, mock, baseUrl;
+let dataDir, app, db, mock, baseUrl, authCookie;
+const setupToken = "test-setup-token-32-characters-long";
 let reply = { title: "测试事项" };
 let modelFails = false;
 const prompts = [];
@@ -29,7 +30,12 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function api(path, method = "GET", body) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
-    ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    headers: {
+      Origin: baseUrl,
+      ...(authCookie ? { Cookie: authCookie } : {}),
+      ...(body === undefined ? {} : { "Content-Type": "application/json" })
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
   });
   return { status: response.status, body: await response.json() };
 }
@@ -39,7 +45,9 @@ async function capture(text, topicId = "auto", decision = {}, image = false) {
   form.set("text", text);
   form.set("topicId", topicId);
   if (image) form.set("attachment", new Blob([Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==", "base64")], { type: "image/png" }), "测试截图.png");
-  const response = await fetch(`${baseUrl}/api/captures`, { method: "POST", body: form });
+  const response = await fetch(`${baseUrl}/api/captures`, {
+    method: "POST", body: form, headers: { Origin: baseUrl, Cookie: authCookie }
+  });
   return { status: response.status, body: await response.json() };
 }
 const itemRow = (id) => db.prepare("SELECT * FROM items WHERE id = ?").get(id);
@@ -87,7 +95,7 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${port}`;
   app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-H", "127.0.0.1", "-p", String(port)], {
     cwd: process.cwd(),
-    env: { ...process.env, ANFANG_ENV: "test", DATA_DIR: "", TEST_DATA_DIR: dataDir, DEEPSEEK_API_KEY: "test-only", DEEPSEEK_BASE_URL: `http://127.0.0.1:${modelPort}`, NEXT_TELEMETRY_DISABLED: "1" },
+    env: { ...process.env, ANFANG_ENV: "test", DATA_DIR: "", TEST_DATA_DIR: dataDir, AUTH_SETUP_TOKEN: setupToken, DEEPSEEK_API_KEY: "test-only", DEEPSEEK_BASE_URL: `http://127.0.0.1:${modelPort}`, NEXT_TELEMETRY_DISABLED: "1" },
     stdio: ["ignore", "pipe", "pipe"]
   });
   let output = "";
@@ -95,12 +103,19 @@ before(async () => {
   app.stderr.on("data", (chunk) => { output += chunk; });
   let ready = false;
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    try { ready = (await fetch(`${baseUrl}/api/dashboard`)).ok; } catch { /* starting */ }
+    try { ready = (await fetch(`${baseUrl}/api/auth/state`)).ok; } catch { /* starting */ }
     if (ready) break;
     if (app.exitCode !== null) throw new Error(`Test server exited: ${output}`);
     await delay(200);
   }
   assert.ok(ready, `Test server did not start. Run npm run build first. ${output}`);
+  const setup = await fetch(`${baseUrl}/api/auth/setup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: baseUrl },
+    body: JSON.stringify({ setupToken, username: "测试主人", password: "test-password-123", remember: true })
+  });
+  assert.equal(setup.status, 201);
+  authCookie = setup.headers.get("set-cookie").split(";", 1)[0];
   db = new DatabaseSync(join(dataDir, "app.db"));
 });
 
@@ -132,7 +147,7 @@ test("test UI is labeled, push is blocked, and the initial theme is restored bef
   assert.equal((await api("/api/push/public-key")).status, 403);
   assert.equal((await api("/api/push/subscribe", "POST", {})).status, 403);
   assert.equal((await api("/manifest.webmanifest")).body.short_name, "安放测试");
-  const html = await (await fetch(baseUrl)).text();
+  const html = await (await fetch(baseUrl, { headers: { Cookie: authCookie } })).text();
   assert.match(html, /自动化测试/);
   assert.ok(html.indexOf('id="anfang-theme-init"') < html.indexOf("<body"));
   const script = html.match(/<script id="anfang-theme-init">([\s\S]*?)<\/script>/)?.[1];
@@ -160,7 +175,7 @@ test("topic creation, normalized duplicates, validation, and edit conflicts", as
   for (const name of [" ", "长".repeat(81)]) assert.equal((await api("/api/topics", "POST", { name })).status, 400);
   assert.equal((await api(`/api/topics/${topicB.id}`, "PATCH", { name: "星河项目" })).status, 409);
   assert.equal((await api(`/api/topics/${randomUUID()}`)).status, 404);
-  const malformed = await fetch(`${baseUrl}/api/topics`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{" });
+  const malformed = await fetch(`${baseUrl}/api/topics`, { method: "POST", headers: { "Content-Type": "application/json", Origin: baseUrl, Cookie: authCookie }, body: "{" });
   assert.equal(malformed.status, 400);
 });
 
@@ -257,7 +272,7 @@ test("screenshots retain their attachment and manually chosen topic", async () =
   assert.equal(result.status, 200);
   assert.equal(result.body.item.topicId, topicB.id);
   assert.equal(result.body.item.attachment.mimeType, "image/png");
-  const image = await fetch(`${baseUrl}/api/attachments/${result.body.item.attachment.id}`);
+  const image = await fetch(`${baseUrl}/api/attachments/${result.body.item.attachment.id}`, { headers: { Cookie: authCookie } });
   assert.equal(image.status, 200);
   assert.equal(image.headers.get("content-type"), "image/png");
 });

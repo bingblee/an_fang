@@ -5,6 +5,7 @@ import { getDb, itemSelect, mapItem } from "@/lib/db";
 import { snoozeDate } from "@/lib/date";
 import { categoryIds } from "@/lib/category-definitions";
 import { initialReviewPlan, nextReviewPlan } from "@/lib/review-policy";
+import { requireApiSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,8 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const { id } = await context.params;
   const parsed = actionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {

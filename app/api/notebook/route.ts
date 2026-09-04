@@ -6,6 +6,7 @@ import {
   notebookSummaryFromMarkdown,
   notebookTitleFromMarkdown
 } from "@/lib/notebook-markdown.mjs";
+import { requireApiSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,8 @@ const createNoteSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const parsed = createNoteSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message || "笔记内容不正确。" }, { status: 400 });

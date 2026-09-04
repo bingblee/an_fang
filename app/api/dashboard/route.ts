@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireApiSession } from "@/lib/auth";
 import { getDb, itemSelect, mapItem, mapNotebookNote } from "@/lib/db";
 import type { DashboardData } from "@/lib/types";
 import { listTopics } from "@/lib/topics";
@@ -8,7 +9,9 @@ import { getRuntimeConfig } from "@/lib/runtime-config.mjs";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const db = getDb();
   const rows = db
     .prepare(

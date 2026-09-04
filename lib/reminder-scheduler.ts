@@ -48,8 +48,13 @@ export async function checkDueReminders() {
     if (!dueItems.length) return;
 
     const subscriptions = db
-      .prepare("SELECT id, endpoint, p256dh, auth FROM push_subscriptions")
-      .all() as unknown as PushRow[];
+      .prepare(
+        `SELECT subscription.id, subscription.endpoint, subscription.p256dh, subscription.auth
+         FROM push_subscriptions subscription
+         JOIN auth_sessions session ON session.token_hash = subscription.session_token_hash
+         WHERE session.expires_at > ?`
+      )
+      .all(new Date().toISOString()) as unknown as PushRow[];
     if (!subscriptions.length) return;
 
     const sender = configureWebPush();

@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb, itemSelect, mapItem } from "@/lib/db";
 import { listTopics, topicNameKey, topicSchema } from "@/lib/topics";
+import { requireApiSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const { id } = await context.params;
   const db = getDb();
   const topic = listTopics(db).find((entry) => entry.id === id);
@@ -18,6 +21,8 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
 }
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const { id } = await context.params;
   const parsed = topicSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message || "话题信息不正确。" }, { status: 400 });

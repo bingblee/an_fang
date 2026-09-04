@@ -70,6 +70,9 @@ export async function refreshDevelopmentData({
     }
     // 测试环境不继承正式浏览器的推送订阅，避免误发通知。
     if (tableNames.has("push_subscriptions")) cloned.exec("DELETE FROM push_subscriptions");
+    // 保留同一主人账号，便于使用相同密码测试；不复制正式环境的登录状态和限流记录。
+    if (tableNames.has("auth_sessions")) cloned.exec("DELETE FROM auth_sessions");
+    if (tableNames.has("auth_login_attempts")) cloned.exec("DELETE FROM auth_login_attempts");
     cloned.exec("COMMIT");
     if (cloned.prepare("PRAGMA integrity_check").get().integrity_check !== "ok" ||
         cloned.prepare("PRAGMA foreign_key_check").all().length) {

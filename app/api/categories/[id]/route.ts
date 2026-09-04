@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb, itemSelect, mapItem } from "@/lib/db";
 import { listCategories } from "@/lib/categories";
 import { categoryIds } from "@/lib/category-definitions";
+import { requireApiSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const { id } = await context.params;
   if (!categoryIds.some((category) => category === id)) {
     return NextResponse.json({ error: "没有找到这个分类。" }, { status: 404 });

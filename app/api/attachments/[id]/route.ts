@@ -1,15 +1,18 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getDb, uploadsDir } from "@/lib/db";
+import { requireApiSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const { id } = await context.params;
   const row = getDb()
     .prepare(
@@ -30,9 +33,8 @@ export async function GET(
     headers: {
       "Content-Type": row.mime_type,
       "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(row.original_name)}`,
-      "Cache-Control": "private, max-age=3600",
+      "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff"
     }
   });
 }
-

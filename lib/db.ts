@@ -187,8 +187,38 @@ function initialize(db: DatabaseSync) {
       endpoint TEXT NOT NULL UNIQUE,
       p256dh TEXT NOT NULL,
       auth TEXT NOT NULL,
+      session_token_hash TEXT,
       user_agent TEXT,
       created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      username_key TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry
+      ON auth_sessions(expires_at);
+
+    CREATE TABLE IF NOT EXISTS auth_login_attempts (
+      attempt_key TEXT PRIMARY KEY,
+      attempts INTEGER NOT NULL,
+      window_started_at TEXT NOT NULL,
+      blocked_until TEXT,
       updated_at TEXT NOT NULL
     );
   `);
@@ -213,6 +243,10 @@ function initialize(db: DatabaseSync) {
   }
   if (!itemColumns.some((column) => column.name === "review_interval_days")) {
     db.exec("ALTER TABLE items ADD COLUMN review_interval_days INTEGER");
+  }
+  const pushColumns = db.prepare("PRAGMA table_info(push_subscriptions)").all() as Array<{ name: string }>;
+  if (!pushColumns.some((column) => column.name === "session_token_hash")) {
+    db.exec("ALTER TABLE push_subscriptions ADD COLUMN session_token_hash TEXT");
   }
   db.exec(`WITH ranked AS (
       SELECT id, ROW_NUMBER() OVER (ORDER BY created_at, id) AS position

@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   Clock3,
+  CircleUserRound,
   FolderOpen,
   ImagePlus,
   Inbox,
@@ -1159,7 +1160,7 @@ function NotebookPage({
   );
 }
 
-export function AppShell({ environment, remindersEnabled }: { environment: AppEnvironment; remindersEnabled: boolean }) {
+export function AppShell({ environment, remindersEnabled, username }: { environment: AppEnvironment; remindersEnabled: boolean; username: string }) {
   const [data, setData] = useState<DashboardData>(emptyDashboard);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1177,6 +1178,10 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/dashboard", { cache: "no-store" });
+    if (response.status === 401) {
+      window.location.replace("/login");
+      throw new Error("登录状态已失效");
+    }
     if (!response.ok) throw new Error("暂时无法读取事项");
     const result = (await response.json()) as DashboardData;
     setData(result);
@@ -1432,6 +1437,9 @@ export function AppShell({ environment, remindersEnabled }: { environment: AppEn
             <RefreshCw className={refreshing ? "spin" : undefined} size={17} />
           </button>
           <ThemeToggle />
+          <a className="account-button" href="/account" title={`账号：${username}`} aria-label={`账号设置，当前用户 ${username}`}>
+            <CircleUserRound size={18} />
+          </a>
           <button
             className={`notification-button ${notificationState === "granted" ? "enabled" : ""}`}
             disabled={!remindersEnabled}

@@ -11,6 +11,7 @@ import { canMergeIntoTopic, createTopic, listTopics, parseTopicCommand, resolveT
 import type { Topic, TopicSource } from "@/lib/types";
 import { z } from "zod";
 import { initialReviewPlan } from "@/lib/review-policy";
+import { requireApiSession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,6 +73,8 @@ function addTrigger(
 }
 
 export async function POST(request: NextRequest) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   const formData = await request.formData().catch(() => null);
   if (!formData) return NextResponse.json({ error: "无法读取提交的内容。" }, { status: 400 });
   const text = String(formData.get("text") || "").trim();
