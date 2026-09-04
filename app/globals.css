@@ -141,14 +141,33 @@ body {
 .auth-intro {
   position: relative;
   isolation: isolate;
+  overflow: hidden;
   padding: 42px 48px 38px;
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line);
+  background: #31443b;
+}
+
+.auth-intro::before {
+  content: "";
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  background-image: url("/auth-sanctuary.jpg");
+  background-repeat: no-repeat;
+  background-position: right center;
+  background-size: auto 100%;
+}
+
+.auth-intro::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
   background:
-    linear-gradient(180deg, rgba(8, 20, 16, 0.08) 0%, rgba(8, 20, 16, 0.03) 45%, rgba(5, 15, 12, 0.34) 100%),
-    linear-gradient(90deg, rgba(6, 19, 14, 0.1), transparent 68%),
-    url("/auth-sanctuary.jpg") 56% center / cover no-repeat;
+    linear-gradient(180deg, rgba(8, 20, 16, 0.07) 0%, rgba(8, 20, 16, 0.02) 46%, rgba(5, 15, 12, 0.34) 100%),
+    linear-gradient(90deg, rgba(6, 19, 14, 0.12), transparent 70%);
 }
 
 .auth-brand { position: relative; z-index: 1; }
@@ -2393,7 +2412,11 @@ a:focus-visible {
   .auth-threshold { min-height: 0; grid-template-columns: 1fr; }
   .auth-threshold::before, .auth-threshold::after { display: none; }
   .auth-intro { padding: 25px 24px 22px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .auth-intro { min-height: 260px; background-position: center 62%; }
+  .auth-intro { min-height: 260px; }
+  .auth-intro::before {
+    background-position: center 62%;
+    background-size: 100% auto;
+  }
   .auth-intro-copy { margin: 42px 0 28px; padding: 0; }
   .auth-intro-copy h1 { max-width: 290px; font-size: 32px; }
   .auth-form { padding: 29px 24px 31px; }
