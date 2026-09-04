@@ -820,7 +820,10 @@ a:focus-visible {
   padding-top: 42px;
 }
 
-.notebook-page { padding-top: 32px; }
+.notebook-page {
+  max-width: 1080px;
+  padding-top: 32px;
+}
 
 .task-section {
   margin-top: 48px;
