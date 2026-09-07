@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Item, ItemEnrichment, NotebookNote } from "@/lib/types";
 import { ensureDataDirectory, getRuntimeConfig } from "@/lib/runtime-config.mjs";
+import { initializeSystemAccount } from "@/lib/account-store.mjs";
 
 const runtimeConfig = getRuntimeConfig(process.env, /* turbopackIgnore: true */ process.cwd());
 export const dataDir = runtimeConfig.dataDir;
@@ -26,7 +27,7 @@ function ensureUserColumn(db: DatabaseSync, table: string) {
   }
 }
 
-function migrateTopicsForUsers(db: DatabaseSync, legacyOwnerId: string | null) {
+function migrateTopicsForUsers(db: DatabaseSync) {
   const columns = tableColumns(db, "topics");
   const schema = (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'topics'")
     .get() as { sql?: string } | undefined)?.sql || "";
@@ -52,13 +53,13 @@ function migrateTopicsForUsers(db: DatabaseSync, legacyOwnerId: string | null) {
     if (columns.has("user_id")) {
       db.prepare(`INSERT INTO topics_user_migration
         (id, user_id, name, name_key, description, created_at, updated_at)
-        SELECT id, COALESCE(user_id, ?), name, name_key, description, created_at, updated_at
-        FROM topics`).run(legacyOwnerId);
+        SELECT id, user_id, name, name_key, description, created_at, updated_at
+        FROM topics`).run();
     } else {
       db.prepare(`INSERT INTO topics_user_migration
         (id, user_id, name, name_key, description, created_at, updated_at)
-        SELECT id, ?, name, name_key, description, created_at, updated_at
-        FROM topics`).run(legacyOwnerId);
+        SELECT id, NULL, name, name_key, description, created_at, updated_at
+        FROM topics`).run();
     }
     db.exec("DROP TABLE topics");
     db.exec("ALTER TABLE topics_user_migration RENAME TO topics");
@@ -69,20 +70,6 @@ function migrateTopicsForUsers(db: DatabaseSync, legacyOwnerId: string | null) {
     throw error;
   } finally {
     db.exec("PRAGMA foreign_keys = ON");
-  }
-}
-
-export function claimLegacyData(db: DatabaseSync, userId: string) {
-  for (const table of [
-    "captures",
-    "topics",
-    "items",
-    "notebook_notes",
-    "feedback",
-    "context_facts",
-    "push_subscriptions"
-  ]) {
-    db.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id IS NULL`).run(userId);
   }
 }
 
@@ -306,10 +293,7 @@ function initialize(db: DatabaseSync) {
     );
   `);
 
-  const legacyOwner = db.prepare(
-    "SELECT id FROM auth_users ORDER BY created_at ASC, id ASC LIMIT 1"
-  ).get() as { id: string } | undefined;
-  migrateTopicsForUsers(db, legacyOwner?.id || null);
+  migrateTopicsForUsers(db);
   for (const table of [
     "captures",
     "items",
@@ -318,7 +302,6 @@ function initialize(db: DatabaseSync) {
     "context_facts",
     "push_subscriptions"
   ]) ensureUserColumn(db, table);
-  if (legacyOwner) claimLegacyData(db, legacyOwner.id);
 
   const itemColumns = db.prepare("PRAGMA table_info(items)").all() as Array<{
     name: string;
@@ -381,10 +364,18 @@ function initialize(db: DatabaseSync) {
 }
 
 export function getDb() {
+  if (process.env.ANFANG_BUILD === "1") throw new Error("构建期间不能打开运行数据库。");
   if (!globalThis.__anfangDb) {
     ensureDataDirectory(runtimeConfig);
     const db = new DatabaseSync(join(dataDir, "app.db"));
-    initialize(db);
+    try {
+      db.exec("PRAGMA busy_timeout = 5000");
+      initialize(db);
+      initializeSystemAccount(db, dataDir);
+    } catch (error) {
+      db.close();
+      throw error;
+    }
     globalThis.__anfangDb = db;
   }
   return globalThis.__anfangDb;

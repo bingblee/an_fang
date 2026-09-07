@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,9 +68,14 @@ test("multi-user authentication protects registration, data isolation, sessions,
     const privatePage = await fetch(baseUrl, { redirect: "manual" });
     assert.ok([307, 308].includes(privatePage.status));
     assert.equal(new URL(privatePage.headers.get("location"), baseUrl).pathname, "/login");
-    const earlyRegistration = await fetch(`${baseUrl}/register`, { redirect: "manual" });
-    assert.ok([307, 308].includes(earlyRegistration.status));
-    assert.equal(new URL(earlyRegistration.headers.get("location"), baseUrl).pathname, "/setup");
+    assert.equal((await fetch(`${baseUrl}/register`, { redirect: "manual" })).status, 200);
+    for (const path of ["/setup", "/recover"]) {
+      const legacyPage = await fetch(`${baseUrl}${path}`, { redirect: "manual" });
+      assert.ok([307, 308].includes(legacyPage.status));
+      assert.equal(new URL(legacyPage.headers.get("location"), baseUrl).pathname, "/login");
+    }
+    const loginHtml = await (await fetch(`${baseUrl}/login`)).text();
+    assert.doesNotMatch(loginHtml, /首次设置口令|AUTH_SETUP_TOKEN|忘记密码/);
     const missingAttachment = await json("/api/attachments/missing");
     assert.equal(missingAttachment.response.status, 401);
     const loginArtwork = await fetch(`${baseUrl}/auth-sanctuary.jpg`);
@@ -80,25 +85,20 @@ test("multi-user authentication protects registration, data isolation, sessions,
     const state = await json("/api/auth/state");
     assert.deepEqual(state.body, {
       authenticated: false,
-      needsSetup: true,
-      setupConfigured: true,
       username: null
     });
-    assert.equal((await post("/api/auth/register", {
-      username: "抢先注册",
-      password: "early-register-123",
-      remember: true
-    })).response.status, 409);
-    assert.equal((await post("/api/auth/setup", { setupToken: "wrong", username: "主人", password: "strong-pass-123", remember: true })).response.status, 403);
-    assert.equal((await post("/api/auth/setup", { setupToken, username: "主人", password: "strong-pass-123", remember: true }, null, { Origin: "https://evil.example" })).response.status, 403);
-
-    const setup = await post("/api/auth/setup", {
-      setupToken,
-      username: "主人",
-      password: "strong-pass-123",
+    assert.equal((await post("/api/auth/setup", { setupToken, username: "主人", password: "strong-pass-123", remember: true })).response.status, 410);
+    assert.equal((await post("/api/auth/recover", { setupToken, username: "bingbing", password: "strong-pass-123" })).response.status, 410);
+    assert.equal((await post("/api/auth/register", { username: " ＢＩＮＧＢＩＮＧ ", password: "strong-pass-123" })).response.status, 409);
+    const initial = JSON.parse(await readFile(join(dataDir, "initial-account.json"), "utf8"));
+    assert.equal(initial.username, "bingbing");
+    assert.ok(!output.includes(initial.password));
+    const setup = await post("/api/auth/login", {
+      username: initial.username,
+      password: initial.password,
       remember: true
     });
-    assert.equal(setup.response.status, 201);
+    assert.equal(setup.response.status, 200);
     const rememberedHeader = setup.response.headers.get("set-cookie");
     assert.match(rememberedHeader, /anfang_session=/);
     assert.match(rememberedHeader, /HttpOnly/i);
@@ -116,13 +116,13 @@ test("multi-user authentication protects registration, data isolation, sessions,
        VALUES ('test-subscription', 'https://push.example.test', 'key', 'auth', ?, ?, ?)`
     ).run(rememberedHash, new Date().toISOString(), new Date().toISOString());
 
-    assert.equal((await post("/api/auth/setup", { setupToken, username: "另一个人", password: "another-pass-123", remember: true })).response.status, 409);
+    assert.equal((await post("/api/auth/setup", { setupToken, username: "另一个人", password: "another-pass-123", remember: true })).response.status, 410);
     assert.equal((await fetch(`${baseUrl}/register`)).status, 200);
     assert.equal((await json("/api/dashboard", { headers: { Cookie: rememberedCookie } })).response.status, 200);
     assert.equal((await json("/api/attachments/missing", { headers: { Cookie: rememberedCookie } })).response.status, 404);
     const signedInState = await json("/api/auth/state", { headers: { Cookie: rememberedCookie } });
     assert.equal(signedInState.body.authenticated, true);
-    assert.equal(signedInState.body.username, "主人");
+    assert.equal(signedInState.body.username, "bingbing");
 
     const ownerTopic = await post(
       "/api/topics",
@@ -252,8 +252,8 @@ test("multi-user authentication protects registration, data isolation, sessions,
     assert.equal((await json("/api/dashboard", { headers: { Cookie: rememberedCookie } })).response.status, 401);
     assert.equal(database.prepare("SELECT count(*) AS count FROM push_subscriptions").get().count, 0);
 
-    assert.equal((await post("/api/auth/login", { username: "主人", password: "wrong-password", remember: false })).response.status, 401);
-    const login = await post("/api/auth/login", { username: " 主人 ", password: "strong-pass-123", remember: false });
+    assert.equal((await post("/api/auth/login", { username: "bingbing", password: "wrong-password", remember: false })).response.status, 401);
+    const login = await post("/api/auth/login", { username: " ＢＩＮＧＢＩＮＧ ", password: initial.password, remember: false });
     assert.equal(login.response.status, 200);
     const sessionHeader = login.response.headers.get("set-cookie");
     assert.doesNotMatch(sessionHeader, /Max-Age/i);
@@ -268,15 +268,16 @@ test("multi-user authentication protects registration, data isolation, sessions,
     const changed = await fetch(`${baseUrl}/api/auth/password`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Origin: baseUrl, Cookie: sessionCookie },
-      body: JSON.stringify({ currentPassword: "strong-pass-123", newPassword: "new-strong-pass-456" })
+      body: JSON.stringify({ currentPassword: initial.password, newPassword: "new-strong-pass-456" })
     });
     assert.equal(changed.status, 200);
+    await assert.rejects(readFile(join(dataDir, "initial-account.json")), { code: "ENOENT" });
     const changedCookie = changed.headers.get("set-cookie").split(";", 1)[0];
     assert.equal((await json("/api/dashboard", { headers: { Cookie: sessionCookie } })).response.status, 401);
     assert.equal((await json("/api/dashboard", { headers: { Cookie: changedCookie } })).response.status, 200);
     assert.equal((await json("/api/dashboard", { headers: { Cookie: memberCookie } })).response.status, 200);
-    assert.equal((await post("/api/auth/login", { username: "主人", password: "strong-pass-123", remember: true })).response.status, 401);
-    assert.equal((await post("/api/auth/login", { username: "主人", password: "new-strong-pass-456", remember: true })).response.status, 200);
+    assert.equal((await post("/api/auth/login", { username: "bingbing", password: initial.password, remember: true })).response.status, 401);
+    assert.equal((await post("/api/auth/login", { username: "bingbing", password: "new-strong-pass-456", remember: true })).response.status, 200);
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
       assert.equal((await post("/api/auth/login", { username: "不存在", password: "wrong-password", remember: true })).response.status, 401);
@@ -285,15 +286,15 @@ test("multi-user authentication protects registration, data isolation, sessions,
     assert.equal(blocked.response.status, 429);
     assert.equal(blocked.response.headers.get("retry-after"), "900");
 
-    assert.equal((await post("/api/auth/recover", {
-      setupToken: "wrong",
-      username: "主人",
-      password: "final-strong-pass-789",
-      remember: true
-    })).response.status, 403);
-    const recovered = await post("/api/auth/recover", {
-      setupToken,
-      username: "主人",
+    const passwordFile = join(dataDir, "reset-password.txt");
+    await writeFile(passwordFile, "final-strong-pass-789\n", { mode: 0o600 });
+    const reset = spawnSync(process.execPath, ["scripts/reset-password.mjs", "--env", "test", "--username", "bingbing", "--password-file", passwordFile], {
+      env: { ...process.env, DATA_DIR: "", TEST_DATA_DIR: dataDir }, encoding: "utf8"
+    });
+    assert.equal(reset.status, 0, reset.stderr);
+    assert.doesNotMatch(reset.stdout + reset.stderr, /final-strong-pass-789/);
+    const recovered = await post("/api/auth/login", {
+      username: "bingbing",
       password: "final-strong-pass-789",
       remember: true
     });
@@ -304,7 +305,7 @@ test("multi-user authentication protects registration, data isolation, sessions,
     assert.equal((await json("/api/dashboard", { headers: { Cookie: changedCookie } })).response.status, 401);
     assert.equal((await json("/api/dashboard", { headers: { Cookie: recoveredCookie } })).response.status, 200);
     assert.equal((await json("/api/dashboard", { headers: { Cookie: memberCookie } })).response.status, 200);
-    assert.equal((await post("/api/auth/login", { username: "主人", password: "new-strong-pass-456", remember: true })).response.status, 401);
+    assert.equal((await post("/api/auth/login", { username: "bingbing", password: "new-strong-pass-456", remember: true })).response.status, 401);
     database.close();
   } finally {
     if (app.exitCode === null) {

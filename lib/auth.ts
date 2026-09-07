@@ -1,13 +1,15 @@
-import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-import { claimLegacyData, getDb } from "@/lib/db";
+import { dataDir, getDb } from "@/lib/db";
+import { hashPassword, normalizeUsername, updateAccountPassword, verifyPassword } from "@/lib/account-store.mjs";
+
+export { hashPassword, normalizeUsername, passwordProblem, usernameProblem, verifyPassword } from "@/lib/account-store.mjs";
 
 export const sessionCookieName = "anfang_session";
 export const rememberedSessionSeconds = 60 * 60 * 24 * 30;
 export const browserSessionSeconds = 60 * 60 * 24;
 
-const scryptOptions = { N: 16_384, r: 8, p: 1, maxmem: 32 * 1024 * 1024 };
 const sessionTouchIntervalMs = 15 * 60 * 1000;
 const loginWindowMs = 15 * 60 * 1000;
 const loginBlockMs = 15 * 60 * 1000;
@@ -38,52 +40,6 @@ type UserRow = {
   password_salt: string;
 };
 
-export function normalizeUsername(value: string) {
-  return value.trim().normalize("NFKC").toLocaleLowerCase("zh-CN");
-}
-
-export function passwordProblem(value: string) {
-  if (value.length < 10) return "密码至少需要 10 个字符。";
-  if (value.length > 200) return "密码不能超过 200 个字符。";
-  if (!/[A-Za-z]/.test(value) || !/\d/.test(value)) return "密码需要同时包含字母和数字。";
-  return null;
-}
-
-export function usernameProblem(value: string) {
-  const normalized = value.trim().normalize("NFKC");
-  if (normalized.length < 2) return "用户名至少需要 2 个字符。";
-  if (normalized.length > 40) return "用户名不能超过 40 个字符。";
-  if (/\p{C}/u.test(normalized)) return "用户名包含不能使用的字符。";
-  return null;
-}
-
-function derivePassword(password: string, salt: string) {
-  return new Promise<Buffer>((resolve, reject) => {
-    scryptCallback(password, salt, 64, scryptOptions, (error, derivedKey) => {
-      if (error) reject(error);
-      else resolve(derivedKey);
-    });
-  });
-}
-
-export async function hashPassword(password: string, salt = randomBytes(16).toString("hex")) {
-  const derived = await derivePassword(password, salt);
-  return { hash: derived.toString("hex"), salt };
-}
-
-export async function verifyPassword(password: string, hash: string, salt: string) {
-  const derived = await derivePassword(password, salt);
-  const expected = Buffer.from(hash, "hex");
-  return expected.length === derived.length && timingSafeEqual(expected, derived);
-}
-
-export function hasOwnerAccount() {
-  const row = getDb().prepare("SELECT 1 AS present FROM auth_users LIMIT 1").get() as
-    | { present: number }
-    | undefined;
-  return Boolean(row);
-}
-
 export function findUser(username: string) {
   return getDb()
     .prepare("SELECT id, username, username_key, password_hash, password_salt FROM auth_users WHERE username_key = ?")
@@ -96,11 +52,7 @@ export function findUserById(userId: string) {
     .get(userId) as UserRow | undefined;
 }
 
-async function createAccount(
-  username: string,
-  password: string,
-  options: { onlyFirst: boolean; claimLegacy: boolean }
-) {
+export async function createUser(username: string, password: string) {
   const db = getDb();
   const displayName = username.trim().normalize("NFKC");
   const key = normalizeUsername(displayName);
@@ -111,10 +63,7 @@ async function createAccount(
   try {
     db.exec("BEGIN IMMEDIATE");
     transactionOpen = true;
-    if (
-      (options.onlyFirst && db.prepare("SELECT 1 FROM auth_users LIMIT 1").get()) ||
-      db.prepare("SELECT 1 FROM auth_users WHERE username_key = ?").get(key)
-    ) {
+    if (db.prepare("SELECT 1 FROM auth_users WHERE username_key = ?").get(key)) {
       db.exec("ROLLBACK");
       transactionOpen = false;
       return null;
@@ -124,7 +73,6 @@ async function createAccount(
         (id, username, username_key, password_hash, password_salt, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(userId, displayName, key, credentials.hash, credentials.salt, now, now);
-    if (options.claimLegacy) claimLegacyData(db, userId);
     db.exec("COMMIT");
     transactionOpen = false;
     return { id: userId, username: displayName };
@@ -132,14 +80,6 @@ async function createAccount(
     if (transactionOpen) db.exec("ROLLBACK");
     throw error;
   }
-}
-
-export async function createOwner(username: string, password: string) {
-  return createAccount(username, password, { onlyFirst: true, claimLegacy: true });
-}
-
-export async function createUser(username: string, password: string) {
-  return createAccount(username, password, { onlyFirst: false, claimLegacy: false });
 }
 
 function sessionHash(token: string) {
@@ -228,14 +168,6 @@ export async function clearSessionCookie(request: Request) {
     path: "/",
     expires: new Date(0)
   });
-}
-
-export function setupTokenMatches(value: string) {
-  const expected = process.env.AUTH_SETUP_TOKEN || "";
-  if (expected.length < 20 || value.length > 500) return false;
-  const expectedHash = createHash("sha256").update(expected).digest();
-  const valueHash = createHash("sha256").update(value).digest();
-  return timingSafeEqual(expectedHash, valueHash);
 }
 
 export function requestOriginAllowed(request: NextRequest) {
@@ -334,16 +266,6 @@ export async function runDummyPasswordCheck(password: string) {
   await verifyPassword(password, dummyHash, dummySalt);
 }
 
-export async function changePassword(userId: string, password: string) {
-  const credentials = await hashPassword(password);
-  const now = new Date().toISOString();
-  const db = getDb();
-  db.prepare(
-    "UPDATE auth_users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?"
-  ).run(credentials.hash, credentials.salt, now, userId);
-  db.prepare(
-    `DELETE FROM push_subscriptions
-     WHERE session_token_hash IN (SELECT token_hash FROM auth_sessions WHERE user_id = ?)`
-  ).run(userId);
-  db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId);
+export async function changePassword(userId: string, password: string, expectedHash: string) {
+  return updateAccountPassword(getDb(), dataDir, userId, password, expectedHash);
 }

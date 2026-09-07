@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +14,6 @@ import { ensureDataDirectory, getRuntimeConfig } from "../lib/runtime-config.mjs
 // Exercise the production routes against a disposable database and a deterministic
 // model endpoint. No real API key, user data, notifications, or external AI calls.
 let dataDir, app, db, mock, baseUrl, authCookie;
-const setupToken = "test-setup-token-32-characters-long";
 let reply = { title: "测试事项" };
 let modelFails = false;
 const prompts = [];
@@ -102,7 +101,7 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${port}`;
   app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "-H", "127.0.0.1", "-p", String(port)], {
     cwd: process.cwd(),
-    env: { ...process.env, ANFANG_ENV: "test", DATA_DIR: "", TEST_DATA_DIR: dataDir, AUTH_SETUP_TOKEN: setupToken, DEEPSEEK_API_KEY: "test-only", DEEPSEEK_BASE_URL: `http://127.0.0.1:${modelPort}`, NEXT_TELEMETRY_DISABLED: "1" },
+    env: { ...process.env, ANFANG_ENV: "test", DATA_DIR: "", TEST_DATA_DIR: dataDir, AUTH_SETUP_TOKEN: "", DEEPSEEK_API_KEY: "test-only", DEEPSEEK_BASE_URL: `http://127.0.0.1:${modelPort}`, NEXT_TELEMETRY_DISABLED: "1" },
     stdio: ["ignore", "pipe", "pipe"]
   });
   let output = "";
@@ -116,12 +115,13 @@ before(async () => {
     await delay(200);
   }
   assert.ok(ready, `Test server did not start. Run npm run build first. ${output}`);
-  const setup = await fetch(`${baseUrl}/api/auth/setup`, {
+  const initial = JSON.parse(await readFile(join(dataDir, "initial-account.json"), "utf8"));
+  const setup = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: baseUrl },
-    body: JSON.stringify({ setupToken, username: "测试主人", password: "test-password-123", remember: true })
+    body: JSON.stringify({ username: initial.username, password: initial.password, remember: true })
   });
-  assert.equal(setup.status, 201);
+  assert.equal(setup.status, 200);
   authCookie = setup.headers.get("set-cookie").split(";", 1)[0];
   db = new DatabaseSync(join(dataDir, "app.db"));
 });
@@ -149,7 +149,7 @@ test("legacy database adds a review cycle without altering existing task content
   assert.equal(legacyItem.status, "later");
   assert.ok(legacyItem.reviewAt);
   assert.equal(itemRow(legacyId).title, "原有事项，不要丢失");
-  const ownerId = db.prepare("SELECT id FROM auth_users WHERE username_key = '测试主人'").get().id;
+  const ownerId = db.prepare("SELECT id FROM auth_users WHERE username_key = 'bingbing'").get().id;
   assert.equal(db.prepare("SELECT user_id FROM captures WHERE id = ?").get(legacyItem.captureId).user_id, ownerId);
   assert.equal(itemRow(legacyId).user_id, ownerId);
   assert.equal(db.prepare("SELECT user_id FROM topics WHERE id = ?").get(legacyTopicId).user_id, ownerId);

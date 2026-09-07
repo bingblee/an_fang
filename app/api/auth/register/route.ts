@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
   createSession,
   createUser,
-  hasOwnerAccount,
   passwordProblem,
   requestOriginAllowed,
   setSessionCookie,
@@ -22,9 +21,6 @@ const registerSchema = z.object({
 export async function POST(request: NextRequest) {
   if (!requestOriginAllowed(request)) {
     return NextResponse.json({ error: "请求来源无效。" }, { status: 403 });
-  }
-  if (!hasOwnerAccount()) {
-    return NextResponse.json({ error: "请先完成系统的首次设置。" }, { status: 409 });
   }
   const parsed = registerSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {

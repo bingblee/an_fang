@@ -33,7 +33,9 @@ export async function PATCH(request: NextRequest) {
   if (!user || !(await verifyPassword(parsed.data.currentPassword, user.password_hash, user.password_salt))) {
     return NextResponse.json({ error: "当前密码不正确。" }, { status: 401 });
   }
-  await changePassword(current.userId, parsed.data.newPassword);
+  if (!(await changePassword(current.userId, parsed.data.newPassword, user.password_hash))) {
+    return NextResponse.json({ error: "密码已在其他地方更新，请重新登录。" }, { status: 409 });
+  }
   const session = createSession(current.userId, current.remembered);
   await setSessionCookie(request, session);
   return NextResponse.json(
