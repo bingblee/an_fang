@@ -10,6 +10,10 @@
 
 ## 文档
 
+- [重开发前项目审查报告](docs/redevelopment-audit.md)
+- [重开发需求文档](docs/redevelopment-requirements.md)
+- [重开发系统设计文档](docs/redevelopment-design.md)
+- [重开发 UI / UX 说明](docs/redevelopment-ui-ux.md)
 - [产品愿景与原则](docs/product-vision.md)
 - [MVP 产品需求](docs/mvp-spec.md)
 - [个人上下文与生活关系](docs/personal-context.md)
