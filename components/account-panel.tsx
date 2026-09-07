@@ -4,8 +4,9 @@ import { ArrowLeft, Eye, EyeOff, LoaderCircle, LogOut } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { synchronizePushSubscription } from "@/lib/browser-push";
 
-export function AccountPanel({ username }: { username: string }) {
+export function AccountPanel({ username, remindersEnabled }: { username: string; remindersEnabled: boolean }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -36,6 +37,11 @@ export function AccountPanel({ username }: { username: string }) {
       setNewPassword("");
       setConfirmation("");
       setMessage({ text: result.message || "密码已更新。", error: false });
+      if (remindersEnabled) {
+        await synchronizePushSubscription().catch(() => {
+          setMessage({ text: "密码已更新。系统提醒恢复失败，请返回首页重新开启。", error: false });
+        });
+      }
     } catch (cause) {
       setMessage({ text: cause instanceof Error ? cause.message : "密码暂时没有更新。", error: true });
     } finally {

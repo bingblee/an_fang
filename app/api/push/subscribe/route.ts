@@ -4,23 +4,16 @@ import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { getRuntimeConfig } from "@/lib/runtime-config.mjs";
 import { getCurrentSessionTokenHash, requireApiSession } from "@/lib/auth";
+import { pushSubscriptionSchema } from "@/lib/push-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const subscriptionSchema = z.object({
-  endpoint: z.string().url().max(4096),
-  keys: z.object({
-    p256dh: z.string().min(1).max(512),
-    auth: z.string().min(1).max(512)
-  })
-});
 
 export async function POST(request: NextRequest) {
   const auth = await requireApiSession(request);
   if (!auth.ok) return auth.response;
   if (!getRuntimeConfig().remindersEnabled) return NextResponse.json({ error: "当前环境不发送系统提醒。" }, { status: 403 });
-  const parsed = subscriptionSchema.safeParse(await request.json());
+  const parsed = pushSubscriptionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "提醒订阅信息无效。" }, { status: 400 });
   }

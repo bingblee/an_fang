@@ -53,6 +53,7 @@ import {
   searchNotebookNotes
 } from "@/lib/notebook-search.mjs";
 import { MarkdownContent, MarkdownEditor } from "@/components/markdown-note";
+import { synchronizePushSubscription, type NotificationState } from "@/lib/browser-push";
 
 type Tab = "today" | "later" | "topics" | "notebook";
 type Toast = { message: string; tone: "success" | "error" | "neutral" } | null;
@@ -91,13 +92,6 @@ function dateHeading() {
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value || "";
   return `${value("month")}月${value("day")}日，${value("weekday")}`;
-}
-
-function urlBase64ToUint8Array(value: string) {
-  const padding = "=".repeat((4 - (value.length % 4)) % 4);
-  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const raw = window.atob(base64);
-  return Uint8Array.from([...raw].map((character) => character.charCodeAt(0)));
 }
 
 function formatSchedule(value: string | null, windowLabel: string | null) {
@@ -1172,9 +1166,9 @@ export function AppShell({ environment, remindersEnabled, username }: { environm
   const [composerMode, setComposerMode] = useState<ComposerMode>("full");
   const [todayGroup, setTodayGroup] = useState<TodayGroupId | null>(null);
   const composerCompactRef = useRef(false);
-  const [notificationState, setNotificationState] = useState<NotificationPermission | "unsupported">(
-    "unsupported"
-  );
+  const [notificationState, setNotificationState] = useState<NotificationState>("disabled");
+  const [notificationBusy, setNotificationBusy] = useState(false);
+  const notificationSyncing = useRef(false);
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/dashboard", { cache: "no-store" });
@@ -1195,10 +1189,44 @@ export function AppShell({ environment, remindersEnabled, username }: { environm
         setLoading(false);
         setToast({ message: "暂时无法读取已经保存的事项。", tone: "error" });
       });
-      if ("Notification" in window) setNotificationState(Notification.permission);
     }, 0);
     return () => window.clearTimeout(timer);
   }, [refresh]);
+
+  const syncNotifications = useCallback(async (requestPermission = false) => {
+    if (!remindersEnabled || notificationSyncing.current) return;
+    notificationSyncing.current = true;
+    setNotificationBusy(true);
+    try {
+      const state = await synchronizePushSubscription(requestPermission);
+      setNotificationState(state);
+      if (requestPermission) {
+        setToast({
+          message: state === "enabled" ? "提醒已经开启，离开页面也不会错过。" :
+            state === "unsupported" ? "当前浏览器不支持系统通知。" : "你可以稍后在浏览器设置中开启提醒。",
+          tone: state === "enabled" ? "success" : "neutral"
+        });
+      }
+    } catch {
+      setNotificationState("disabled");
+      if (requestPermission) setToast({ message: "提醒暂时没有开启，请稍后再试。", tone: "error" });
+    } finally {
+      notificationSyncing.current = false;
+      setNotificationBusy(false);
+    }
+  }, [remindersEnabled]);
+
+  useEffect(() => {
+    const sync = () => { void syncNotifications(); };
+    const initial = window.setTimeout(sync, 0);
+    const interval = window.setInterval(sync, 60_000);
+    window.addEventListener("focus", sync);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", sync);
+    };
+  }, [syncNotifications]);
 
   useEffect(() => {
     if (!toast) return;
@@ -1354,41 +1382,6 @@ export function AppShell({ environment, remindersEnabled, username }: { environm
     ? todayGroup
     : visibleTodayGroups[0]?.id ?? null;
 
-  const requestNotifications = async () => {
-    if (!remindersEnabled) return;
-    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
-      setToast({ message: "当前浏览器不支持系统通知。", tone: "neutral" });
-      return;
-    }
-    try {
-      const permission = await Notification.requestPermission();
-      setNotificationState(permission);
-      if (permission !== "granted") {
-        setToast({ message: "你可以稍后在浏览器设置中开启提醒。", tone: "neutral" });
-        return;
-      }
-      const registration = await navigator.serviceWorker.register("/sw.js");
-      const keyResponse = await fetch("/api/push/public-key", { cache: "no-store" });
-      const { publicKey } = (await keyResponse.json()) as { publicKey: string };
-      const existing = await registration.pushManager.getSubscription();
-      const subscription =
-        existing ||
-        (await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey)
-        }));
-      const response = await fetch("/api/push/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(subscription.toJSON())
-      });
-      if (!response.ok) throw new Error("提醒订阅保存失败");
-      setToast({ message: "提醒已经开启，离开页面也不会错过。", tone: "success" });
-    } catch {
-      setToast({ message: "提醒暂时没有开启，请稍后再试。", tone: "error" });
-    }
-  };
-
   return (
     <div className="app-frame">
       <header className="topbar">
@@ -1441,13 +1434,13 @@ export function AppShell({ environment, remindersEnabled, username }: { environm
             <CircleUserRound size={18} />
           </a>
           <button
-            className={`notification-button ${notificationState === "granted" ? "enabled" : ""}`}
-            disabled={!remindersEnabled}
-            onClick={() => void requestNotifications()}
-            title={!remindersEnabled ? "当前环境不发送系统提醒" : notificationState === "granted" ? "系统提醒已开启" : "开启系统提醒"}
-            aria-label={!remindersEnabled ? "当前环境不发送系统提醒" : notificationState === "granted" ? "系统提醒已开启" : "开启系统提醒"}
+            className={`notification-button ${notificationState === "enabled" ? "enabled" : ""}`}
+            disabled={!remindersEnabled || notificationBusy}
+            onClick={() => void syncNotifications(true)}
+            title={!remindersEnabled ? "当前环境不发送系统提醒" : notificationBusy ? "正在同步系统提醒" : notificationState === "enabled" ? "系统提醒已开启" : "开启系统提醒"}
+            aria-label={!remindersEnabled ? "当前环境不发送系统提醒" : notificationBusy ? "正在同步系统提醒" : notificationState === "enabled" ? "系统提醒已开启" : "开启系统提醒"}
           >
-            <Bell size={18} />
+            {notificationBusy ? <LoaderCircle className="spin" size={18} /> : <Bell size={18} />}
           </button>
         </div>
       </header>

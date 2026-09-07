@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ExtractedItem, MergeCandidate } from "@/lib/types";
 import type { TopicContext } from "@/lib/topics";
 import { categoryIds } from "@/lib/category-definitions";
+import { resolveLocalSpecificTime } from "@/lib/date";
 
 const extractionSchema = z.object({
   title: z.string().min(1).max(120),
@@ -154,21 +155,7 @@ function localExtraction(
               ? "下午"
             : null;
 
-  const timeMatch = clean.match(/(上午|下午|晚上)?\s*(\d{1,2})\s*(?:[:：点])\s*(\d{1,2})?/);
-  let specificTime: string | null = null;
-  if (timeMatch) {
-    const anchor = mergeTarget?.scheduledFor
-      ? new Date(mergeTarget.scheduledFor)
-      : new Date();
-    if (!mergeTarget?.scheduledFor && /明天|明日/.test(clean)) {
-      anchor.setDate(anchor.getDate() + 1);
-    }
-    let hour = Number(timeMatch[2]);
-    const minute = Number(timeMatch[3] || 0);
-    if ((timeMatch[1] === "下午" || timeMatch[1] === "晚上") && hour < 12) hour += 12;
-    anchor.setHours(hour, minute, 0, 0);
-    specificTime = anchor.toISOString();
-  }
+  const specificTime = resolveLocalSpecificTime(clean, mergeTarget?.scheduledFor);
 
   return {
     title: mergeTarget?.title || title,

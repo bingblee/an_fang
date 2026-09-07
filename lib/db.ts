@@ -369,6 +369,7 @@ function initialize(db: DatabaseSync) {
   db.exec("CREATE INDEX IF NOT EXISTS idx_notebook_user_created ON notebook_notes(user_id, created_at DESC)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_context_facts_user ON context_facts(user_id, fact_type)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_reminders_item_schedule ON reminders(item_id, scheduled_for, created_at)");
   db.exec(`
     INSERT OR IGNORE INTO item_sources (item_id, capture_id, relation, created_at)
     SELECT id, capture_id, 'primary', created_at FROM items;
@@ -387,6 +388,18 @@ export function getDb() {
     globalThis.__anfangDb = db;
   }
   return globalThis.__anfangDb;
+}
+
+export function withTransaction<T>(db: DatabaseSync, operation: () => T): T {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = operation();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 type ItemRow = Record<string, string | number | null>;

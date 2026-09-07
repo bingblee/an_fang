@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDb } from "@/lib/db";
 import { configureWebPush } from "@/lib/push";
 import { getRuntimeConfig } from "@/lib/runtime-config.mjs";
+import { pushSubscriptionSchema } from "@/lib/push-policy";
 
 declare global {
   var __anfangReminderTimer: NodeJS.Timeout | undefined;
@@ -30,27 +31,8 @@ export async function checkDueReminders() {
   globalThis.__anfangReminderRunning = true;
   try {
     const db = getDb();
-    const dueItems = db
-      .prepare(
-        `SELECT i.id, i.user_id, i.title, i.scheduled_for, i.source_excerpt
-         FROM items i
-         WHERE i.user_id IS NOT NULL
-           AND i.status = 'scheduled'
-           AND i.scheduled_for IS NOT NULL
-           AND i.scheduled_for <= ?
-           AND NOT EXISTS (
-             SELECT 1 FROM reminders r
-             WHERE r.item_id = i.id
-               AND r.scheduled_for = i.scheduled_for
-               AND r.delivered_at IS NOT NULL
-           )
-         ORDER BY i.scheduled_for ASC
-         LIMIT 20`
-      )
-      .all(new Date().toISOString()) as unknown as DueItem[];
-    if (!dueItems.length) return;
-
-    const subscriptions = db
+    const now = new Date();
+    const subscriptions = (db
       .prepare(
         `SELECT subscription.id, subscription.user_id, subscription.endpoint,
                 subscription.p256dh, subscription.auth
@@ -59,8 +41,48 @@ export async function checkDueReminders() {
            AND session.user_id = subscription.user_id
          WHERE subscription.user_id IS NOT NULL AND session.expires_at > ?`
       )
-      .all(new Date().toISOString()) as unknown as PushRow[];
+      .all(now.toISOString()) as unknown as PushRow[]).flatMap((subscription) => {
+        // Revalidate stored subscriptions too, including records saved before this policy.
+        const parsed = pushSubscriptionSchema.safeParse({
+          endpoint: subscription.endpoint,
+          keys: { p256dh: subscription.p256dh, auth: subscription.auth }
+        });
+        if (!parsed.success) {
+          db.prepare("DELETE FROM push_subscriptions WHERE id = ?").run(subscription.id);
+          return [];
+        }
+        return [{ ...subscription, endpoint: parsed.data.endpoint }];
+      });
     if (!subscriptions.length) return;
+
+    const dueItems = db
+      .prepare(
+        `SELECT i.id, i.user_id, i.title, i.scheduled_for, i.source_excerpt
+         FROM items i
+         WHERE i.user_id IS NOT NULL
+           AND i.status = 'scheduled'
+           AND i.scheduled_for IS NOT NULL
+           AND i.scheduled_for <= ?
+           AND EXISTS (
+             SELECT 1 FROM push_subscriptions subscription
+             JOIN auth_sessions session ON session.token_hash = subscription.session_token_hash
+               AND session.user_id = subscription.user_id
+             WHERE subscription.user_id = i.user_id AND session.expires_at > ?
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM reminders r
+             WHERE r.item_id = i.id
+               AND r.scheduled_for = i.scheduled_for
+               AND (r.delivered_at IS NOT NULL OR r.created_at > ?)
+           )
+         ORDER BY COALESCE((
+           SELECT MAX(r.created_at) FROM reminders r
+           WHERE r.item_id = i.id AND r.scheduled_for = i.scheduled_for
+         ), ''), i.scheduled_for ASC, i.id
+         LIMIT 20`
+      )
+      .all(now.toISOString(), now.toISOString(), new Date(now.getTime() - 5 * 60_000).toISOString()) as unknown as DueItem[];
+    if (!dueItems.length) return;
 
     const sender = configureWebPush();
     for (const item of dueItems) {
@@ -78,7 +100,7 @@ export async function checkDueReminders() {
               itemId: item.id,
               url: "/"
             }),
-            { TTL: 60 * 60 * 6, urgency: "normal" }
+            { TTL: 60 * 60 * 6, urgency: "normal", timeout: 10_000 }
           );
           delivered = true;
         } catch (error) {
@@ -92,14 +114,14 @@ export async function checkDueReminders() {
         }
       }
 
-      if (delivered) {
-        const now = new Date().toISOString();
-        db.prepare(
-          `INSERT INTO reminders
-            (id, item_id, reason, scheduled_for, delivered_at, created_at)
-           VALUES (?, ?, '到达设定时间', ?, ?, ?)`
-        ).run(randomUUID(), item.id, item.scheduled_for, now, now);
-      }
+      // Failed attempts cool down and sort behind unattempted work on the next pass.
+      const attemptedAt = new Date().toISOString();
+      db.prepare(
+        `INSERT INTO reminders
+          (id, item_id, reason, scheduled_for, delivered_at, outcome, created_at)
+         VALUES (?, ?, '到达设定时间', ?, ?, ?, ?)`
+      ).run(randomUUID(), item.id, item.scheduled_for, delivered ? attemptedAt : null,
+        delivered ? 'delivered' : 'retry', attemptedAt);
     }
   } finally {
     globalThis.__anfangReminderRunning = false;

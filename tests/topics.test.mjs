@@ -634,6 +634,56 @@ test("today resurfaces at most three due items and every decision removes one fr
   assert.ok(after.review.some((item) => item.id === ids[3]));
 });
 
+test("saving a waiting item without a date succeeds without a review trigger", async () => {
+  const created = await capture("等合同审核回复", "none", { scheduleHint: "waiting", needsConfirmation: true });
+  const id = created.body.item.id;
+  const edited = await api(`/api/items/${id}`, "PATCH", {
+    action: "edit", title: "等待合同审核", scheduledFor: null, status: "waiting"
+  });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.item.status, "waiting");
+  assert.equal(edited.body.item.scheduledFor, null);
+  assert.equal(edited.body.item.reviewAt, null);
+  assert.equal(edited.body.item.needsConfirmation, false);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM triggers WHERE item_id = ? AND active = 1").get(id).n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM feedback WHERE item_id = ? AND kind = 'edit'").get(id).n, 1);
+});
+
+test("item edits roll back task and trigger changes when feedback cannot be saved", async () => {
+  const created = await capture("事务回滚测试", "none", { scheduleHint: "tomorrow", needsConfirmation: true });
+  const id = created.body.item.id;
+  const before = itemRow(id);
+  const triggers = db.prepare("SELECT * FROM triggers WHERE item_id = ?").all(id);
+  db.exec(`CREATE TRIGGER reject_review_feedback BEFORE INSERT ON feedback
+    WHEN NEW.item_id = '${id}' BEGIN SELECT RAISE(ABORT, 'simulated feedback failure'); END;`);
+  try {
+    const edited = await api(`/api/items/${id}`, "PATCH", {
+      action: "edit", title: "不应留下的修改", scheduledFor: null, status: "waiting"
+    });
+    assert.equal(edited.status, 500);
+    assert.match(edited.body.error, /未修改/);
+    assert.deepEqual(itemRow(id), before);
+    assert.deepEqual(db.prepare("SELECT * FROM triggers WHERE item_id = ?").all(id), triggers);
+  } finally {
+    db.exec("DROP TRIGGER reject_review_feedback");
+  }
+});
+
+test("an offline model preserves the date in a next-week capture with a clock time", async () => {
+  modelFails = true;
+  try {
+    const created = await capture("下周一上午9点检查演示设备", "none");
+    assert.equal(created.status, 200);
+    assert.equal(created.body.item.extractionSource, "local");
+    const expected = new Date();
+    expected.setDate(expected.getDate() + 7 - (expected.getDay() + 6) % 7);
+    expected.setHours(9, 0, 0, 0);
+    assert.equal(created.body.item.scheduledFor, expected.toISOString());
+  } finally {
+    modelFails = false;
+  }
+});
+
 test("manual notebook notes can be created without a task or AI call", async () => {
   const itemsBefore = itemCount();
   const promptsBefore = prompts.length;
